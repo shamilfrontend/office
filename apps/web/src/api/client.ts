@@ -116,6 +116,10 @@ export const api = {
     request<ChatRecord[]>(
       `/ai/chats?open=1&documentId=${encodeURIComponent(documentId)}`,
     ),
+  listClosedChats: (documentId: string) =>
+    request<ChatSummary[]>(
+      `/ai/chats?open=0&documentId=${encodeURIComponent(documentId)}`,
+    ),
   createChat: (body: {
     mode?: string
     providerId?: string
@@ -130,6 +134,10 @@ export const api = {
     request<ChatRecord>(`/ai/chats/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  closeChat: (id: string) =>
+    request<{ ok: boolean; chat: ChatRecord | null }>(`/ai/chats/${id}/close`, {
+      method: 'POST',
     }),
   deleteChat: (id: string) =>
     request<{ ok: boolean; chat: ChatRecord | null }>(`/ai/chats/${id}`, {
@@ -161,7 +169,7 @@ export type ChatMessageRecord = {
   createdAt: string
 }
 
-export type ChatRecord = {
+export type ChatSummary = {
   id: string
   title: string
   mode: string
@@ -174,5 +182,8 @@ export type ChatRecord = {
   sortOrder: number
   createdAt: string
   updatedAt: string
+}
+
+export type ChatRecord = ChatSummary & {
   messages: ChatMessageRecord[]
 }

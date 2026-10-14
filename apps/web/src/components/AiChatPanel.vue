@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useRouter } from 'vue-router'
-import { api, type ChatRecord } from '@/api/client'
+import { api, type ChatRecord, type ChatSummary } from '@/api/client'
 import { uiConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import type { UniverApi } from '@/univer/useUniver'
@@ -104,7 +105,17 @@ const transcriptEl = ref<HTMLElement | null>(null)
 const attachError = ref('')
 const sessionLog = ref<SessionLogEntry[]>([])
 const logCopied = ref(false)
+const historyOpen = ref(false)
+const historyItems = ref<ChatSummary[]>([])
+const historyLoading = ref(false)
+const historyError = ref('')
+const renamingId = ref('')
+const renameDraft = ref('')
+const expandedTools = ref<Set<string>>(new Set())
+const approveExpanded = ref(false)
+const copiedKey = ref('')
 let logCopiedTimer: ReturnType<typeof setTimeout> | null = null
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 const hasProvider = computed(() => Boolean(auth.me?.hasAiProvider))
 const providers = computed(() => auth.me?.providers?.filter((p) => p.enabled) ?? [])
@@ -120,6 +131,50 @@ const planOverview = computed(() => {
   if (tab.plan?.overview) return tab.plan.overview
   const body = tab.planMarkdown.replace(/^#.*\n+/, '')
   return body.split('\n').filter(Boolean).slice(0, 4).join(' ').slice(0, 280)
+})
+const composerPlaceholder = computed(() => {
+  const mode = active.value?.mode
+  if (mode === 'plan') return 'Опишите задачу для плана…'
+  if (mode === 'chat') return 'Спросите что угодно…'
+  return 'Что сделать с документом?'
+})
+const emptyHints = computed(() => {
+  const mode = active.value?.mode || 'agent'
+  if (mode === 'plan') {
+    return [
+      'Составь план очистки и нормализации таблицы',
+      'Разбей задачу на шаги без правок файла',
+      'Какие риски у массовой замены значений?',
+    ]
+  }
+  if (mode === 'chat') {
+    return [
+      'Объясни структуру текущего файла',
+      'Как лучше оформить заголовки?',
+      'Что означают эти формулы?',
+    ]
+  }
+  return [
+    'Найди пустые ячейки и предложи правки',
+    'Отформатируй заголовки и ширину столбцов',
+    'Заполни пропуски по соседним значениям',
+  ]
+})
+const approveSummary = computed(() => {
+  const pending = active.value?.pendingApprove
+  if (!pending) return ''
+  const args = pending.args
+  const keys = Object.keys(args)
+  if (!keys.length) return pending.name
+  const preview = keys
+    .slice(0, 3)
+    .map((key) => {
+      const value = args[key]
+      const text = typeof value === 'string' ? value : JSON.stringify(value)
+      return `${key}: ${String(text).slice(0, 48)}`
+    })
+    .join(' · ')
+  return preview
 })
 
 watch(
@@ -140,11 +195,30 @@ function resetTabs() {
   activeId.value = ''
   sessionLog.value = []
   logCopied.value = false
+  historyOpen.value = false
+  historyItems.value = []
+  historyError.value = ''
+  renamingId.value = ''
+  renameDraft.value = ''
+  expandedTools.value = new Set()
+  approveExpanded.value = false
+  copiedKey.value = ''
   if (logCopiedTimer) {
     clearTimeout(logCopiedTimer)
     logCopiedTimer = null
   }
+  if (copiedTimer) {
+    clearTimeout(copiedTimer)
+    copiedTimer = null
+  }
 }
+
+watch(
+  () => active.value?.pendingApprove,
+  () => {
+    approveExpanded.value = false
+  },
+)
 
 function pushSessionLog(
   tab: Tab | null | undefined,
@@ -242,7 +316,80 @@ function readWidth() {
 }
 
 function renderMd(text: string) {
-  return marked.parse(text || '', { async: false }) as string
+  const raw = marked.parse(text || '', { async: false }) as string
+  const withCopy = raw.replace(
+    /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
+    (_match, attrs: string, code: string) =>
+      `<div class="code-block"><button type="button" class="copy-code" data-copy="1">Копировать</button><pre><code${attrs}>${code}</code></pre></div>`,
+  )
+  return DOMPurify.sanitize(withCopy, {
+    ADD_ATTR: ['data-copy'],
+    ADD_TAGS: ['button'],
+  })
+}
+
+async function copyText(text: string, key: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedKey.value = key
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => {
+      copiedKey.value = ''
+      copiedTimer = null
+    }, 1500)
+  } catch {
+    attachError.value = 'Не удалось скопировать'
+  }
+}
+
+function onTranscriptClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  const btn = target?.closest?.('.copy-code') as HTMLElement | null
+  if (!btn) return
+  const pre = btn.parentElement?.querySelector('code')
+  const text = pre?.textContent || ''
+  void copyText(text, `code:${text.slice(0, 24)}`)
+  btn.textContent = 'Скопировано'
+  setTimeout(() => {
+    btn.textContent = 'Копировать'
+  }, 1200)
+}
+
+function isToolOpen(message: Extract<UiMsg, { role: 'tool' }>) {
+  if (message.status === 'error' || message.status === 'pending') return true
+  return expandedTools.value.has(message.key)
+}
+
+function toggleTool(key: string) {
+  const next = new Set(expandedTools.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedTools.value = next
+}
+
+function applyHint(text: string) {
+  const tab = active.value
+  if (!tab || tab.streaming) return
+  tab.draft = text
+}
+
+function toggleIncludeDoc() {
+  const tab = active.value
+  if (!tab) return
+  tab.includeDoc = !tab.includeDoc
+}
+
+function formatHistoryDate(value: string) {
+  try {
+    return new Date(value).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return value
+  }
 }
 
 function visibleUser(text: string) {
@@ -382,23 +529,116 @@ async function addTab() {
 
 async function closeTab(id: string) {
   const tab = findTab(id)
+  if (!tab) return
+  tab.abort?.abort()
+  tab.pendingApprove?.resolve(false)
+  if (renamingId.value === id) {
+    renamingId.value = ''
+    renameDraft.value = ''
+  }
+  try {
+    const result = await api.closeChat(id)
+    tabs.value = tabs.value.filter((item) => item.id !== id)
+    if (result.chat) tabs.value.push(tabFromRecord(result.chat))
+    if (!tabs.value.some((item) => item.id === activeId.value)) {
+      activeId.value = tabs.value[0]?.id || ''
+    }
+    if (historyOpen.value) void loadHistory()
+    await ensureDefaultModel()
+  } catch (e) {
+    attachError.value = e instanceof Error ? e.message : 'Не удалось закрыть чат'
+  }
+}
+
+async function loadHistory() {
+  if (!props.documentId) return
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    historyItems.value = await api.listClosedChats(props.documentId)
+  } catch (e) {
+    historyError.value = e instanceof Error ? e.message : 'Не удалось загрузить историю'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function toggleHistory() {
+  historyOpen.value = !historyOpen.value
+  modeMenu.value = false
+  modelMenu.value = false
+  if (historyOpen.value) await loadHistory()
+}
+
+async function reopenChat(id: string) {
+  try {
+    const record = await api.updateChat(id, { pinnedOpen: true })
+    if (!tabs.value.some((tab) => tab.id === record.id)) {
+      tabs.value.push(tabFromRecord(record))
+    }
+    activeId.value = record.id
+    historyOpen.value = false
+    historyItems.value = historyItems.value.filter((item) => item.id !== id)
+    await ensureDefaultModel()
+  } catch (e) {
+    historyError.value = e instanceof Error ? e.message : 'Не удалось открыть чат'
+  }
+}
+
+async function deleteFromHistory(id: string) {
+  const item = historyItems.value.find((row) => row.id === id)
   const ok = await uiConfirm({
     title: 'Удалить чат?',
-    message: tab?.title
-      ? `Чат «${tab.title}» будет удалён.`
-      : 'Чат будет удалён.',
+    message: item?.title
+      ? `Чат «${item.title}» будет удалён безвозвратно.`
+      : 'Чат будет удалён безвозвратно.',
     confirmLabel: 'Удалить',
   })
   if (!ok) return
-  tab?.abort?.abort()
-  tab?.pendingApprove?.resolve(false)
-  const result = await api.deleteChat(id)
-  tabs.value = tabs.value.filter((item) => item.id !== id)
-  if (result.chat) tabs.value.push(tabFromRecord(result.chat))
-  if (!tabs.value.some((item) => item.id === activeId.value)) {
-    activeId.value = tabs.value[0]?.id || ''
+  try {
+    await api.deleteChat(id)
+    historyItems.value = historyItems.value.filter((row) => row.id !== id)
+  } catch (e) {
+    historyError.value = e instanceof Error ? e.message : 'Не удалось удалить чат'
   }
-  await ensureDefaultModel()
+}
+
+function startRename(tab: Tab) {
+  renamingId.value = tab.id
+  renameDraft.value = tab.title
+  void nextTick(() => {
+    const input = document.querySelector(
+      `.tab-rename[data-id="${tab.id}"]`,
+    ) as HTMLInputElement | null
+    input?.focus()
+    input?.select()
+  })
+}
+
+function cancelRename() {
+  renamingId.value = ''
+  renameDraft.value = ''
+}
+
+async function commitRename(tab: Tab) {
+  if (renamingId.value !== tab.id) return
+  const next = renameDraft.value.replace(/\s+/g, ' ').trim() || 'Новый чат'
+  renamingId.value = ''
+  renameDraft.value = ''
+  if (next === tab.title) return
+  tab.title = next
+  await patchTab(tab, { title: next })
+}
+
+function onRenameKey(event: KeyboardEvent, tab: Tab) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    void commitRename(tab)
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelRename()
+  }
 }
 
 async function patchTab(tab: Tab, body: Record<string, unknown>) {
@@ -419,6 +659,7 @@ function setMode(mode: ChatMode) {
 
 async function toggleModelMenu() {
   modeMenu.value = false
+  historyOpen.value = false
   modelMenu.value = !modelMenu.value
   if (!modelMenu.value) return
   await loadModelOptions()
@@ -524,6 +765,7 @@ function resolveApprove(ok: boolean) {
   }
   tab?.pendingApprove?.resolve(ok)
   if (tab) tab.pendingApprove = null
+  approveExpanded.value = false
 }
 
 function openPlan() {
@@ -988,54 +1230,146 @@ function onComposerKey(event: KeyboardEvent) {
 <template>
   <aside class="panel" :class="{ collapsed }" :style="panelStyle">
     <div v-if="!collapsed" class="resize" @pointerdown="startResize" />
-    <button v-if="collapsed" type="button" class="expand" @click="emit('toggle')">AI</button>
+    <button v-if="collapsed" type="button" class="expand" @click="emit('toggle')">
+      <span class="expand-label">AI</span>
+    </button>
     <template v-else>
       <header class="tabs">
         <div class="tab-scroll">
-          <button
+          <div
             v-for="tab in tabs"
             :key="tab.id"
-            type="button"
             class="tab"
             :class="{ on: tab.id === activeId }"
             @click="activeId = tab.id"
           >
             <span v-if="tab.streaming" class="spin" />
-            <span class="tab-title">{{ tab.title }}</span>
-            <span class="x" @click.stop="closeTab(tab.id)">×</span>
-          </button>
+            <input
+              v-if="renamingId === tab.id"
+              class="tab-rename"
+              :data-id="tab.id"
+              v-model="renameDraft"
+              @click.stop
+              @keydown="onRenameKey($event, tab)"
+              @blur="commitRename(tab)"
+            />
+            <span
+              v-else
+              class="tab-title"
+              :title="tab.title"
+              @dblclick.stop="startRename(tab)"
+            >{{ tab.title }}</span>
+            <button type="button" class="x" title="Закрыть" @click.stop="closeTab(tab.id)">×</button>
+          </div>
         </div>
-        <button type="button" class="plus" title="Новый чат" @click="addTab">+</button>
-        <button type="button" class="icon" title="Свернуть" @click="emit('toggle')">›</button>
+        <div class="tab-actions">
+          <button type="button" class="plus" title="Новый чат" @click="addTab">+</button>
+          <button
+            type="button"
+            class="icon"
+            title="История"
+            :class="{ on: historyOpen }"
+            @click="toggleHistory"
+          >
+            ☰
+          </button>
+          <button
+            v-if="hasSessionLog"
+            type="button"
+            class="icon"
+            :title="logCopied ? 'Скопировано' : 'Скопировать лог'"
+            @click="copySessionLog"
+          >
+            {{ logCopied ? '✓' : '⎘' }}
+          </button>
+          <button type="button" class="icon" title="Свернуть" @click="emit('toggle')">›</button>
+        </div>
       </header>
+
+      <div v-if="historyOpen" class="history-panel">
+        <div class="history-head">
+          <span>Закрытые чаты</span>
+          <button type="button" class="text" @click="historyOpen = false">Закрыть</button>
+        </div>
+        <p v-if="historyLoading" class="history-hint">Загрузка…</p>
+        <p v-else-if="historyError" class="history-hint error">{{ historyError }}</p>
+        <p v-else-if="!historyItems.length" class="history-hint">Пока пусто</p>
+        <ul v-else class="history-list">
+          <li v-for="item in historyItems" :key="item.id">
+            <button type="button" class="history-main" @click="reopenChat(item.id)">
+              <span class="history-title">{{ item.title || 'Без названия' }}</span>
+              <span class="history-meta">{{ formatHistoryDate(item.updatedAt) }} · {{ modeLabel(asMode(item.mode)) }}</span>
+            </button>
+            <button type="button" class="history-del" title="Удалить" @click="deleteFromHistory(item.id)">×</button>
+          </li>
+        </ul>
+      </div>
+
       <div v-if="docName" class="doc-context" :title="docName">
         Файл: {{ docName }}
       </div>
 
       <div v-if="!hasProvider" class="cta">
-        <p>AI не подключён</p>
-        <button type="button" class="primary" @click="goSettings">Подключить AI</button>
+        <p class="cta-title">Подключите AI-провайдер</p>
+        <p class="cta-text">Добавьте ключ в настройках, чтобы ассистент мог работать с документом.</p>
+        <button type="button" class="primary" @click="goSettings">Открыть настройки</button>
       </div>
       <div v-else-if="!active" class="cta"><p>Открываю чат…</p></div>
       <div v-else class="stack" :class="{ empty: !hasMessages }">
-        <div ref="transcriptEl" class="transcript">
+        <div v-if="!hasMessages" class="empty-state">
+          <h3>{{ modeLabel(active.mode) }}</h3>
+          <p>Напишите задачу или выберите подсказку.</p>
+          <div class="hints">
+            <button
+              v-for="hint in emptyHints"
+              :key="hint"
+              type="button"
+              class="hint"
+              :disabled="active.streaming"
+              @click="applyHint(hint)"
+            >
+              {{ hint }}
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-else
+          ref="transcriptEl"
+          class="transcript"
+          @click="onTranscriptClick"
+        >
           <div v-for="message in active.messages" :key="message.key" class="msg" :class="message.role">
-            <div
-              v-if="message.role === 'assistant' && message.content"
-              class="bubble"
-              v-html="renderMd(message.content)"
-            />
-            <div v-else-if="message.role === 'user'" class="bubble">{{ message.content }}</div>
-            <div v-else-if="message.role === 'tool'" class="tool">
-              <strong>{{ message.name }}</strong>
-              <span :class="message.status">{{ message.status }}</span>
-              <pre>{{ message.content }}</pre>
+            <div v-if="message.role === 'assistant' && message.content" class="assistant-wrap">
+              <div class="bubble md" v-html="renderMd(message.content)" />
+              <button
+                type="button"
+                class="msg-copy"
+                @click="copyText(message.content, message.key)"
+              >
+                {{ copiedKey === message.key ? 'Скопировано' : 'Копировать' }}
+              </button>
             </div>
+            <div v-else-if="message.role === 'user'" class="bubble user-bubble">{{ message.content }}</div>
+            <button
+              v-else-if="message.role === 'tool'"
+              type="button"
+              class="tool"
+              :class="[message.status, { open: isToolOpen(message) }]"
+              @click="toggleTool(message.key)"
+            >
+              <span class="tool-head">
+                <strong>{{ message.name }}</strong>
+                <span class="tool-status">{{ message.status }}</span>
+                <span class="tool-caret">{{ isToolOpen(message) ? '▾' : '▸' }}</span>
+              </span>
+              <pre v-if="isToolOpen(message)">{{ message.content }}</pre>
+            </button>
           </div>
 
           <div v-if="active.streaming" class="status-line">
-            <span>Думаю.</span>
-            <span v-if="active.tokenRate">{{ active.tokenRate }} Токенов / сек</span>
+            <span class="thinking">Думаю<span class="dots" /></span>
+            <span v-if="active.tokenRate">{{ active.tokenRate }} ток/с</span>
           </div>
           <div v-else-if="active.tokenMeta" class="status-line meta">
             <span>{{ active.tokenMeta }}</span>
@@ -1050,8 +1384,15 @@ function onComposerKey(event: KeyboardEvent) {
           </button>
 
           <div v-if="active.pendingApprove" class="approve">
-            <p>Подтвердить массовую правку <strong>{{ active.pendingApprove.name }}</strong>?</p>
-            <pre>{{ JSON.stringify(active.pendingApprove.args, null, 2) }}</pre>
+            <p>
+              Подтвердить массовую правку
+              <strong>{{ active.pendingApprove.name }}</strong>?
+            </p>
+            <p class="approve-summary">{{ approveSummary }}</p>
+            <button type="button" class="text" @click="approveExpanded = !approveExpanded">
+              {{ approveExpanded ? 'Скрыть детали' : 'Показать детали' }}
+            </button>
+            <pre v-if="approveExpanded">{{ JSON.stringify(active.pendingApprove.args, null, 2) }}</pre>
             <div class="row">
               <button type="button" @click="resolveApprove(false)">Отклонить</button>
               <button type="button" class="primary" @click="resolveApprove(true)">Принять</button>
@@ -1060,11 +1401,11 @@ function onComposerKey(event: KeyboardEvent) {
         </div>
 
         <section v-if="active.planMarkdown" class="plan-card">
-          <div class="kicker">План создан</div>
+          <div class="kicker">План</div>
           <h4>{{ active.planTitle || 'План' }}</h4>
           <p>{{ planOverview }}</p>
           <div class="plan-actions">
-            <button type="button" class="text" @click="openPlan">Открыть план</button>
+            <button type="button" class="text" @click="openPlan">Открыть</button>
             <button type="button" class="go" :disabled="active.streaming" @click="runPlan">
               Сделать по плану
             </button>
@@ -1073,16 +1414,43 @@ function onComposerKey(event: KeyboardEvent) {
 
         <div class="composer" :class="{ 'drop-up': hasMessages }">
           <p v-if="attachError" class="attach-error">{{ attachError }}</p>
+          <div class="context-chips">
+            <button
+              type="button"
+              class="chip"
+              :class="{ on: active.includeDoc }"
+              :disabled="!docName"
+              title="Включить текущий документ в контекст"
+              @click="toggleIncludeDoc"
+            >
+              Документ{{ docName ? `: ${docName}` : '' }}
+            </button>
+            <button
+              v-for="(file, index) in active.attachments"
+              :key="file.name + index"
+              type="button"
+              class="chip on attach-chip"
+              :title="file.name"
+              @click="removeAttach(index)"
+            >
+              {{ file.name }} ×
+            </button>
+          </div>
           <textarea
             v-model="active.draft"
             rows="3"
-            placeholder="Продолжить… (xlsx, docx, pptx, pdf)"
+            :placeholder="composerPlaceholder"
             :disabled="active.streaming"
             @keydown="onComposerKey"
           />
           <div class="composer-bar">
             <div class="menus">
-              <button type="button" class="pill" :class="active.mode" @click="modeMenu = !modeMenu; modelMenu = false">
+              <button
+                type="button"
+                class="pill"
+                :class="active.mode"
+                @click="modeMenu = !modeMenu; modelMenu = false; historyOpen = false"
+              >
                 <span v-if="active.mode === 'agent'" class="glyph">⌘</span>
                 <span v-else-if="active.mode === 'plan'" class="glyph">☰</span>
                 <span v-else class="glyph">○</span>
@@ -1114,15 +1482,6 @@ function onComposerKey(event: KeyboardEvent) {
               </div>
             </div>
             <div class="composer-actions">
-              <button
-                v-for="(file, index) in active.attachments"
-                :key="file.name + index"
-                type="button"
-                class="clip on"
-                @click="removeAttach(index)"
-              >
-                {{ file.name }} ×
-              </button>
               <button type="button" class="icon-btn" title="Вложение" @click="pickAttach">
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                   <path
@@ -1153,11 +1512,6 @@ function onComposerKey(event: KeyboardEvent) {
             </div>
           </div>
         </div>
-        <div v-if="hasSessionLog" class="session-log-bar">
-          <button type="button" class="copy-log" @click="copySessionLog">
-            {{ logCopied ? 'Скопировано' : 'Скопировать лог' }}
-          </button>
-        </div>
       </div>
     </template>
 
@@ -1186,7 +1540,7 @@ function onComposerKey(event: KeyboardEvent) {
   min-width: 0;
 }
 .panel.collapsed {
-  width: 44px;
+  width: 40px;
 }
 .resize {
   position: absolute;
@@ -1202,13 +1556,24 @@ function onComposerKey(event: KeyboardEvent) {
   width: 100%;
   border: 0;
   background: var(--bg-2);
-  color: var(--fg-1);
+  color: var(--fg-2);
   cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.expand:hover {
+  color: var(--fg-0);
+  background: var(--bg-hover);
+}
+.expand-label {
   writing-mode: vertical-rl;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 650;
 }
 .doc-context {
-  padding: 4px 12px 6px;
-  font-size: 0.75rem;
+  padding: 5px 12px;
+  font-size: 0.72rem;
   color: var(--fg-3);
   border-bottom: 1px solid var(--border);
   overflow: hidden;
@@ -1219,7 +1584,7 @@ function onComposerKey(event: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 6px 6px 6px 8px;
   border-bottom: 1px solid var(--border);
   min-height: 40px;
 }
@@ -1230,16 +1595,22 @@ function onComposerKey(event: KeyboardEvent) {
   flex: 1;
   min-width: 0;
 }
+.tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 180px;
+  max-width: 170px;
   border: 0;
   background: transparent;
   color: var(--fg-2);
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   cursor: pointer;
 }
 .tab.on {
@@ -1250,9 +1621,30 @@ function onComposerKey(event: KeyboardEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.84rem;
+}
+.tab-rename {
+  width: 110px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--fg-0);
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 0.84rem;
 }
 .x {
+  border: 0;
+  background: transparent;
   color: var(--fg-3);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.x:hover {
+  color: var(--fg-0);
+  background: var(--bg-hover);
 }
 .plus,
 .icon {
@@ -1269,6 +1661,10 @@ function onComposerKey(event: KeyboardEvent) {
 .tab:hover {
   background: var(--bg-hover);
 }
+.icon.on {
+  background: var(--bg-3);
+  color: var(--accent);
+}
 .spin {
   width: 10px;
   height: 10px;
@@ -1276,9 +1672,85 @@ function onComposerKey(event: KeyboardEvent) {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+.history-panel {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px 4px;
+  font-size: 0.78rem;
+  color: var(--fg-3);
+}
+.history-hint {
+  margin: 0;
+  padding: 8px 12px 12px;
+  color: var(--fg-3);
+  font-size: 0.82rem;
+}
+.history-hint.error {
+  color: var(--danger);
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 8px;
+  overflow: auto;
+}
+.history-list li {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+.history-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+.history-main:hover {
+  background: var(--bg-hover);
+}
+.history-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  color: var(--fg-0);
+}
+.history-meta {
+  font-size: 0.72rem;
+  color: var(--fg-3);
+}
+.history-del {
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  width: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.history-del:hover {
+  color: var(--danger);
+  background: var(--bg-hover);
 }
 .cta,
 .stack {
@@ -1288,59 +1760,186 @@ function onComposerKey(event: KeyboardEvent) {
   flex-direction: column;
 }
 .cta {
-  place-items: center;
-  gap: 12px;
-  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 24px;
   color: var(--fg-2);
+  text-align: center;
+}
+.cta-title {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 1rem;
+  font-weight: 650;
+}
+.cta-text {
+  margin: 0 0 4px;
+  max-width: 260px;
+  font-size: 0.88rem;
+  color: var(--fg-3);
+  line-height: 1.45;
+}
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 16px;
+  order: 1;
+}
+.empty-state h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--fg-0);
+  font-weight: 650;
+}
+.empty-state p {
+  margin: 0 0 8px;
+  color: var(--fg-3);
+  font-size: 0.88rem;
+}
+.hints {
+  display: grid;
+  gap: 6px;
+}
+.hint {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+.hint:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg-0);
+}
+.hint:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .transcript {
   flex: 1;
   overflow: auto;
-  padding: 16px 14px 8px;
+  padding: 12px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  order: 1;
 }
-.stack.empty .transcript,
-.stack.empty .plan-card {
+.stack.empty .transcript {
   display: none;
 }
-.stack:not(.empty) .transcript { order: 1; }
-.stack:not(.empty) .plan-card { order: 2; }
-.stack:not(.empty) .composer { order: 3; }
-.stack:not(.empty) .session-log-bar { order: 4; }
-.stack.empty .session-log-bar { order: 2; }
+.stack .plan-card { order: 2; }
+.stack .composer { order: 3; }
+.stack.empty .empty-state { order: 1; }
+.stack.empty .plan-card { order: 2; }
+.stack.empty .composer { order: 3; }
+.msg.user {
+  display: flex;
+  justify-content: flex-end;
+}
+.user-bubble {
+  max-width: 92%;
+  background: var(--bg-3);
+  color: var(--fg-1);
+  border-radius: 12px 12px 4px 12px;
+  padding: 8px 11px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.assistant-wrap {
+  display: grid;
+  gap: 4px;
+}
 .bubble {
   padding: 2px 0;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  color: var(--fg-0);
+  font-size: 0.93rem;
 }
-.msg.user .bubble {
-  color: var(--fg-2);
+.msg-copy {
+  align-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.msg-copy:hover {
+  color: var(--fg-1);
 }
 .tool {
-  border: 1px dashed var(--border);
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 8px;
-  font-size: 0.8rem;
+  padding: 7px 9px;
+  font-size: 0.78rem;
   background: var(--bg-2);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.tool:hover {
+  border-color: var(--fg-3);
+}
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-head strong {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.tool-status {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+.tool.ok .tool-status { color: var(--success); }
+.tool.error .tool-status { color: var(--danger); }
+.tool.pending .tool-status { color: var(--accent); }
+.tool-caret {
+  margin-left: auto;
+  color: var(--fg-3);
 }
 .tool pre {
   white-space: pre-wrap;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   color: var(--fg-3);
+  font-size: 0.75rem;
+  max-height: 180px;
+  overflow: auto;
 }
-.tool .ok { color: var(--success); }
-.tool .error { color: var(--danger); }
 .status-line {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   color: var(--fg-3);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  padding: 2px 2px 0;
 }
 .status-line.meta {
   justify-content: flex-start;
+}
+.thinking .dots::after {
+  content: '';
+  animation: dots 1.2s steps(4, end) infinite;
+}
+@keyframes dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
 }
 .checkpoint {
   align-self: stretch;
@@ -1366,19 +1965,42 @@ function onComposerKey(event: KeyboardEvent) {
   border-radius: 12px;
   padding: 12px;
   background: var(--bg-2);
-  margin: 0 10px 8px;
+}
+.approve {
+  margin-top: 4px;
+}
+.approve p {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+}
+.approve-summary {
+  color: var(--fg-3);
+  font-size: 0.8rem !important;
+}
+.approve pre {
+  margin: 8px 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 0.75rem;
+  color: var(--fg-3);
+  white-space: pre-wrap;
+}
+.plan-card {
+  margin: 0 10px 4px;
 }
 .plan-card h4 {
-  margin: 4px 0 6px;
+  margin: 2px 0 6px;
+  font-size: 0.95rem;
 }
 .plan-card p {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   color: var(--fg-2);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
+  line-height: 1.4;
 }
 .kicker {
   color: var(--fg-3);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1393,7 +2015,8 @@ button.text {
   border: 0;
   color: var(--fg-1);
   cursor: pointer;
-  padding: 6px 0;
+  padding: 4px 0;
+  font-size: 0.84rem;
 }
 button.go {
   background: var(--success);
@@ -1401,8 +2024,9 @@ button.go {
   color: #052e16;
   font-weight: 650;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 7px 11px;
   cursor: pointer;
+  font-size: 0.84rem;
 }
 button.go:disabled {
   opacity: 0.5;
@@ -1416,9 +2040,37 @@ button.go:disabled {
   background: var(--bg-2);
   padding: 8px;
 }
-.composer:focus-within {
-  border-color: var(--border);
-  box-shadow: none;
+.context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 4px 6px;
+  min-height: 0;
+}
+.chip {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-3);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip.on {
+  color: var(--fg-0);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.attach-chip {
+  max-width: 140px;
 }
 .composer textarea {
   width: 100%;
@@ -1428,13 +2080,13 @@ button.go:disabled {
   box-shadow: none;
   background: transparent;
   color: var(--fg-0);
-  padding: 6px;
-  min-height: 64px;
+  padding: 4px 6px;
+  min-height: 56px;
 }
 .composer textarea:focus,
 .composer textarea:focus-visible,
-.composer :is(button, .pill, .model, .send, .icon-btn, .clip):focus,
-.composer :is(button, .pill, .model, .send, .icon-btn, .clip):focus-visible {
+.composer :is(button, .pill, .model, .send, .icon-btn, .chip):focus,
+.composer :is(button, .pill, .model, .send, .icon-btn, .chip):focus-visible {
   outline: none;
   box-shadow: none;
 }
@@ -1455,19 +2107,19 @@ button.go:disabled {
 .model {
   border: 1px solid var(--border);
   background: transparent;
-  color: var(--fg-1);
+  color: var(--fg-2);
   border-radius: 999px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 .pill.agent {
   color: #93c5fd;
-  border-color: #3b82f6;
+  border-color: color-mix(in srgb, #3b82f6 55%, var(--border));
 }
 .pill.plan {
   color: #facc15;
-  border-color: #eab308;
+  border-color: color-mix(in srgb, #eab308 55%, var(--border));
 }
 .caret { color: var(--fg-3); }
 .menu {
@@ -1517,25 +2169,6 @@ button.go:disabled {
   align-items: center;
   gap: 4px;
 }
-.session-log-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 8px 8px;
-}
-.copy-log {
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg-2);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.copy-log:hover {
-  color: var(--fg-0);
-  background: var(--bg-hover);
-}
-.clip,
 .icon-btn {
   border: 0;
   background: transparent;
@@ -1544,20 +2177,23 @@ button.go:disabled {
   border-radius: 8px;
   padding: 4px 6px;
 }
-.clip.on { color: var(--fg-0); }
+.icon-btn:hover {
+  color: var(--fg-0);
+  background: var(--bg-hover);
+}
 .send {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: 0;
   cursor: pointer;
   display: grid;
   place-items: center;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 .send:disabled {
-  background: #3f3f46;
-  color: #a1a1aa;
+  background: var(--bg-3);
+  color: var(--fg-3);
   cursor: default;
 }
 .send.agent:not(:disabled),
@@ -1577,13 +2213,14 @@ button.go:disabled {
 }
 .attach-error {
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   margin: 0 6px 4px;
 }
 .row {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: 8px;
 }
 button.primary {
   background: var(--accent);
@@ -1629,10 +2266,58 @@ button.primary {
   justify-content: flex-end;
   gap: 8px;
 }
-:deep(.bubble p) { margin: 0.4em 0; }
-:deep(.bubble code) {
+:deep(.md p) { margin: 0.35em 0; }
+:deep(.md ul),
+:deep(.md ol) {
+  margin: 0.4em 0;
+  padding-left: 1.2em;
+}
+:deep(.md li) { margin: 0.15em 0; }
+:deep(.md table) {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.84rem;
+  margin: 0.5em 0;
+}
+:deep(.md th),
+:deep(.md td) {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+}
+:deep(.md code) {
   background: var(--bg-3);
   padding: 0 4px;
   border-radius: 4px;
+  font-size: 0.86em;
+}
+:deep(.code-block) {
+  position: relative;
+  margin: 0.5em 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+:deep(.code-block .copy-code) {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+:deep(.code-block pre) {
+  margin: 0;
+  padding: 28px 10px 10px;
+  overflow: auto;
+}
+:deep(.code-block code) {
+  background: transparent;
+  padding: 0;
 }
 </style>

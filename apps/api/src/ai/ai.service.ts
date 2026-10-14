@@ -243,6 +243,21 @@ export class AiService {
     },
   };
 
+  private chatSummarySelect = {
+    id: true,
+    title: true,
+    mode: true,
+    providerId: true,
+    model: true,
+    documentId: true,
+    planTitle: true,
+    planMarkdown: true,
+    pinnedOpen: true,
+    sortOrder: true,
+    createdAt: true,
+    updatedAt: true,
+  };
+
   async listOpenChats(userId: string, documentId?: string) {
     if (!documentId) return [];
     const rows = await this.prisma.chat.findMany({
@@ -253,6 +268,15 @@ export class AiService {
     if (rows.length) return rows;
     const created = await this.createChat(userId, { documentId });
     return [created];
+  }
+
+  async listClosedChats(userId: string, documentId?: string) {
+    if (!documentId) return [];
+    return this.prisma.chat.findMany({
+      where: { userId, pinnedOpen: false, documentId },
+      orderBy: { updatedAt: 'desc' },
+      select: this.chatSummarySelect,
+    });
   }
 
   async createChat(
@@ -293,6 +317,7 @@ export class AiService {
       documentId?: string | null;
       planTitle?: string | null;
       planMarkdown?: string | null;
+      pinnedOpen?: boolean;
       sortOrder?: number;
     },
   ) {
@@ -302,6 +327,27 @@ export class AiService {
       data: body,
       select: this.chatSelect,
     });
+  }
+
+  async closeChat(userId: string, id: string) {
+    const existing = await this.ownChat(userId, id);
+    if (!existing.pinnedOpen) {
+      return { ok: true as const, chat: null };
+    }
+    await this.prisma.chat.update({
+      where: { id },
+      data: { pinnedOpen: false },
+    });
+    const documentId = existing.documentId ?? undefined;
+    if (!documentId) return { ok: true as const, chat: null };
+    const left = await this.prisma.chat.count({
+      where: { userId, pinnedOpen: true, documentId },
+    });
+    if (!left) {
+      const created = await this.createChat(userId, { documentId });
+      return { ok: true as const, chat: created };
+    }
+    return { ok: true as const, chat: null };
   }
 
   async deleteChat(userId: string, id: string) {

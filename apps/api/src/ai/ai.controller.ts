@@ -76,7 +76,7 @@ export class AiController {
     @Query('open') open?: string,
     @Query('documentId') documentId?: string,
   ) {
-    if (open === '0') return [];
+    if (open === '0') return this.ai.listClosedChats(user.id, documentId);
     return this.ai.listOpenChats(user.id, documentId);
   }
 
@@ -107,10 +107,16 @@ export class AiController {
       documentId?: string | null;
       planTitle?: string | null;
       planMarkdown?: string | null;
+      pinnedOpen?: boolean;
       sortOrder?: number;
     },
   ) {
     return this.ai.updateChat(user.id, id, body);
+  }
+
+  @Post('chats/:id/close')
+  closeChat(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.ai.closeChat(user.id, id);
   }
 
   @Delete('chats/:id')

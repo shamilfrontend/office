@@ -8,10 +8,13 @@ import { uiConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import type { UniverApi } from '@/univer/useUniver'
 import {
-  isMassWrite,
+  describeImpact,
+  isDocumentWriteTool,
+  needsApprove,
   runOfficeTool,
   toolsForMode,
   type ChatMode,
+  type ImpactSummary,
 } from '@/univer/officeTools'
 
 type ToolCall = { id: string; name: string; arguments: string }
@@ -63,13 +66,37 @@ type Tab = {
   tokenRate: number | null
   tokenMeta: string | null
   showCheckpoint: boolean
+  wroteSinceCheckpoint: boolean
+  canRetry: boolean
+  retryReason: string | null
   executingPlan: boolean
   abort: AbortController | null
+  allowedTools: Set<string>
   pendingApprove: {
     name: string
     args: Record<string, unknown>
+    summary: ImpactSummary
     resolve: (ok: boolean) => void
   } | null
+}
+
+type LoopStopReason =
+  | 'rejected'
+  | 'aborted'
+  | 'editor'
+  | 'tools'
+  | 'stream'
+  | 'loop'
+  | null
+
+function retryLabel(reason: LoopStopReason): string | null {
+  if (reason === 'rejected') return 'Отклонено'
+  if (reason === 'aborted') return 'Остановлено'
+  if (reason === 'editor') return 'Редактор не готов'
+  if (reason === 'tools') return 'Стоп по ошибкам tools'
+  if (reason === 'stream') return 'Ошибка сети'
+  if (reason === 'loop') return 'Зацикливание tools'
+  return null
 }
 
 const props = defineProps<{
@@ -189,18 +216,8 @@ const emptyHints = computed(() => {
 const approveSummary = computed(() => {
   const pending = active.value?.pendingApprove
   if (!pending) return ''
-  const args = pending.args
-  const keys = Object.keys(args)
-  if (!keys.length) return pending.name
-  const preview = keys
-    .slice(0, 3)
-    .map((key) => {
-      const value = args[key]
-      const text = typeof value === 'string' ? value : JSON.stringify(value)
-      return `${key}: ${String(text).slice(0, 48)}`
-    })
-    .join(' · ')
-  return preview
+  const { title, detail } = pending.summary
+  return detail ? `${title}: ${detail}` : title
 })
 
 watch(
@@ -486,8 +503,12 @@ function tabFromRecord(record: ChatRecord): Tab {
     tokenRate: null,
     tokenMeta: null,
     showCheckpoint: false,
+    wroteSinceCheckpoint: false,
+    canRetry: false,
+    retryReason: null,
     executingPlan: false,
     abort: null,
+    allowedTools: new Set(),
     pendingApprove: null,
   }
 }
@@ -827,20 +848,22 @@ function askApprove(tab: Tab, name: string, args: Record<string, unknown>) {
     }
     const onAbort = () => finish(false)
     tab.abort?.signal.addEventListener('abort', onAbort, { once: true })
-    tab.pendingApprove = { name, args, resolve: finish }
+    const summary = describeImpact(name, args, props.univerApi ?? null)
+    tab.pendingApprove = { name, args, summary, resolve: finish }
   })
 }
 
-function resolveApprove(ok: boolean) {
+function resolveApprove(ok: boolean, always = false) {
   const tab = active.value
   if (tab?.pendingApprove) {
+    if (always && ok) tab.allowedTools.add(tab.pendingApprove.name)
     pushSessionLog(tab, {
       kind: 'system',
       name: 'approve',
       content: JSON.stringify({
         tool: tab.pendingApprove.name,
         args: tab.pendingApprove.args,
-        decision: ok ? 'accepted' : 'rejected',
+        decision: always && ok ? 'always' : ok ? 'accepted' : 'rejected',
       }),
       status: ok ? 'ok' : 'error',
     })
@@ -930,6 +953,9 @@ async function send(preset?: { display: string; wire: string }) {
   tab.tokenRate = null
   tab.tokenMeta = null
   tab.showCheckpoint = false
+  tab.wroteSinceCheckpoint = false
+  tab.canRetry = false
+  tab.retryReason = null
   clearStreamHtml()
   lastTokenRateAt = 0
   const controller = new AbortController()
@@ -938,8 +964,12 @@ async function send(preset?: { display: string; wire: string }) {
   void api.addChatMessage(tab.id, { role: 'user', content: wire })
 
   try {
-    await agentLoop(tab.id)
-    tab.showCheckpoint = Boolean(props.univerApi)
+    const reason = await agentLoop(tab.id)
+    const label = retryLabel(reason)
+    if (label) {
+      tab.canRetry = true
+      tab.retryReason = label
+    }
   } catch (e) {
     const aborted = e instanceof DOMException && e.name === 'AbortError'
     if (!aborted) {
@@ -950,6 +980,8 @@ async function send(preset?: { display: string; wire: string }) {
         content,
       })
       pushSessionLog(tab, { kind: 'system', name: 'error', content, status: 'error' })
+      tab.canRetry = true
+      tab.retryReason = 'Ошибка сети'
     } else {
       pushSessionLog(tab, {
         kind: 'system',
@@ -957,8 +989,56 @@ async function send(preset?: { display: string; wire: string }) {
         content: 'Остановлено пользователем',
         status: 'error',
       })
+      tab.canRetry = true
+      tab.retryReason = 'Остановлено'
     }
   } finally {
+    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi)
+    tab.streaming = false
+    tab.abort = null
+    clearStreamHtml()
+  }
+}
+
+async function retryTurn() {
+  const tab = active.value
+  if (!tab || tab.streaming || !tab.canRetry) return
+  tab.canRetry = false
+  tab.retryReason = null
+  tab.streaming = true
+  tab.tokenRate = null
+  tab.tokenMeta = null
+  tab.showCheckpoint = false
+  clearStreamHtml()
+  lastTokenRateAt = 0
+  const controller = new AbortController()
+  tab.abort = controller
+  if (props.univerApi) emit('checkpoint')
+  try {
+    const reason = await agentLoop(tab.id)
+    const label = retryLabel(reason)
+    if (label) {
+      tab.canRetry = true
+      tab.retryReason = label
+    }
+  } catch (e) {
+    const aborted = e instanceof DOMException && e.name === 'AbortError'
+    if (!aborted) {
+      const content = e instanceof Error ? e.message : 'Ошибка'
+      tab.messages.push({
+        key: crypto.randomUUID(),
+        role: 'assistant',
+        content,
+      })
+      pushSessionLog(tab, { kind: 'system', name: 'error', content, status: 'error' })
+      tab.canRetry = true
+      tab.retryReason = 'Ошибка сети'
+    } else {
+      tab.canRetry = true
+      tab.retryReason = 'Остановлено'
+    }
+  } finally {
+    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi)
     tab.streaming = false
     tab.abort = null
     clearStreamHtml()
@@ -976,9 +1056,9 @@ function stop() {
   }
 }
 
-async function agentLoop(tabId: string) {
+async function agentLoop(tabId: string): Promise<LoopStopReason> {
   const tab = findTab(tabId)
-  if (!tab) return
+  if (!tab) return null
   const signal = tab.abort?.signal
   let steps = 0
   let lastToolSig = ''
@@ -986,7 +1066,7 @@ async function agentLoop(tabId: string) {
   let consecutiveToolErrors = 0
 
   while (steps < 25) {
-    if (signal?.aborted) return
+    if (signal?.aborted) return 'aborted'
     steps++
     const hasDocument = Boolean(props.documentId || props.docName)
     const docType = props.docType === 'DOC' ? 'DOC' : 'SHEET'
@@ -999,7 +1079,7 @@ async function agentLoop(tabId: string) {
         content,
       })
       pushSessionLog(tab, { kind: 'system', name: 'editor', content, status: 'error' })
-      return
+      return 'editor'
     }
     const started = performance.now()
     let chars = 0
@@ -1092,12 +1172,12 @@ async function agentLoop(tabId: string) {
           content: 'Стрим остановлен',
           status: 'error',
         })
-        return
+        return 'aborted'
       }
       throw error
     }
 
-    if (signal?.aborted) return
+    if (signal?.aborted) return 'aborted'
 
     const promptTokens = usagePrompt ?? heuristicPrompt
     const completionTokens = usageCompletion ?? assistant.content.length / 4
@@ -1147,7 +1227,7 @@ async function agentLoop(tabId: string) {
           content,
         })
         pushSessionLog(tab, { kind: 'system', name: 'loop', content, status: 'error' })
-        break
+        return 'loop'
       }
     } else {
       repeats = 0
@@ -1155,7 +1235,7 @@ async function agentLoop(tabId: string) {
     }
 
     for (const call of assistant.toolCalls) {
-      if (signal?.aborted) return
+      if (signal?.aborted) return 'aborted'
       let args: Record<string, unknown> = {}
       try {
         args = JSON.parse(call.arguments || '{}') as Record<string, unknown>
@@ -1172,9 +1252,13 @@ async function agentLoop(tabId: string) {
         status: 'pending',
         toolCallId: call.id,
       })
-      if (isMassWrite(call.name, args)) {
+      const apiRef = props.univerApi ?? null
+      if (
+        !tab.allowedTools.has(call.name) &&
+        needsApprove(call.name, args, apiRef)
+      ) {
         const ok = await askApprove(tab, call.name, args)
-        if (signal?.aborted) return
+        if (signal?.aborted) return 'aborted'
         if (!ok) {
           const rejected = 'Отклонено пользователем'
           setToolRow(tab, toolKey, rejected, rejected, 'error')
@@ -1191,14 +1275,14 @@ async function agentLoop(tabId: string) {
             toolCallId: call.id,
             toolStatus: 'error',
           })
-          continue
+          return 'rejected'
         }
       }
-      if (signal?.aborted) return
+      if (signal?.aborted) return 'aborted'
       let result: string
       try {
         result = await runOfficeTool(call.name, args, {
-          api: props.univerApi ?? null,
+          api: apiRef,
           docType: props.docType === 'DOC' ? 'DOC' : 'SHEET',
           plan: tab.plan,
           setPlan: (plan) => {
@@ -1220,6 +1304,9 @@ async function agentLoop(tabId: string) {
       }
       const status = toolResultStatus(result)
       setToolRow(tab, toolKey, result.slice(0, 500), result, status)
+      if (status !== 'error' && isDocumentWriteTool(call.name)) {
+        tab.wroteSinceCheckpoint = true
+      }
       pushSessionLog(tab, {
         kind: 'tool',
         name: call.name,
@@ -1249,13 +1336,14 @@ async function agentLoop(tabId: string) {
             content,
             status: 'error',
           })
-          return
+          return 'tools'
         }
       } else {
         consecutiveToolErrors = 0
       }
     }
   }
+  return null
 }
 
 function setToolRow(tab: Tab, key: string, content: string, full: string, status: 'ok' | 'error') {
@@ -1641,19 +1729,27 @@ function onComposerKey(event: KeyboardEvent) {
           >
             Контрольная точка
           </button>
+          <div v-if="active.canRetry && !active.streaming" class="retry-row">
+            <button type="button" class="retry" @click="retryTurn">Повторить</button>
+            <span v-if="active.retryReason" class="retry-reason">{{ active.retryReason }}</span>
+          </div>
 
           <div v-if="active.pendingApprove" class="approve">
             <p>
-              Подтвердить массовую правку
+              Подтвердить правку
               <strong>{{ active.pendingApprove.name }}</strong>?
             </p>
             <p class="approve-summary">{{ approveSummary }}</p>
+            <p class="approve-hint">Откат turn — кнопка «Контрольная точка»</p>
             <button type="button" class="text" @click="approveExpanded = !approveExpanded">
               {{ approveExpanded ? 'Скрыть детали' : 'Показать детали' }}
             </button>
             <pre v-if="approveExpanded">{{ JSON.stringify(active.pendingApprove.args, null, 2) }}</pre>
             <div class="row">
               <button type="button" @click="resolveApprove(false)">Отклонить</button>
+              <button type="button" class="text" @click="resolveApprove(true, true)">
+                Всегда в этой сессии
+              </button>
               <button type="button" class="primary" @click="resolveApprove(true)">Принять</button>
             </div>
           </div>
@@ -2218,6 +2314,25 @@ function onComposerKey(event: KeyboardEvent) {
   height: 1px;
   background: var(--border);
 }
+.retry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.retry {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--fg-2);
+}
+.retry-reason {
+  font-size: 0.75rem;
+  color: var(--fg-3);
+}
 .approve,
 .plan-card {
   border: 1px solid var(--border);
@@ -2235,6 +2350,15 @@ function onComposerKey(event: KeyboardEvent) {
 .approve-summary {
   color: var(--fg-3);
   font-size: 0.8rem !important;
+}
+.approve-hint {
+  color: var(--fg-3);
+  font-size: 0.75rem !important;
+  opacity: 0.85;
+}
+.approve .row {
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .approve pre {
   margin: 8px 0;

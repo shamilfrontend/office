@@ -4,18 +4,36 @@ import { setSelectionInjector } from './selection'
 export type DocTextRange = {
   setText: (text: string) => boolean
   getText?: () => string
+  describe?: () => { startOffset?: number; endOffset?: number; text?: string }
   setTextStyle?: (style: {
     bl?: number
     it?: number
     fs?: number
+    ul?: { s?: number }
+    cl?: { rgb?: string }
   }) => boolean
 }
 
+export type DocParagraphInfo = {
+  paragraphIndex: number
+  startOffset: number
+  endOffset: number
+  paragraph?: { paragraphStyle?: { namedStyleType?: number } }
+}
+
 export type DocParagraph = {
+  getId?: () => string
   getText: () => string
   setText: (text: string) => boolean
   appendText: (text: string) => boolean
-  findAllText: (text: string) => DocTextRange[]
+  getInfo?: () => DocParagraphInfo
+  getRange?: () => { startOffset?: number; endOffset?: number }
+  setStyle?: (style: { namedStyleType?: number }) => boolean
+  isListItem?: () => boolean
+  findAllText: (
+    text: string,
+    options?: { matchCase?: boolean },
+  ) => DocTextRange[]
 }
 
 export type UniverDocument = {
@@ -25,9 +43,12 @@ export type UniverDocument = {
   getBody?: (segmentId?: string) => { dataStream?: string }
   insertText: (index: number, text: string, segmentId?: string) => boolean
   appendParagraph: (text?: string, segmentId?: string) => DocParagraph
+  insertParagraph?: (index: number, text?: string, segmentId?: string) => DocParagraph
   getParagraphs: (segmentId?: string) => DocParagraph[]
   deleteRange: (range: { startOffset: number; endOffset: number; segmentId?: string }) => boolean
   getTextRange?: (startOffset: number, endOffset: number, segmentId?: string) => DocTextRange
+  setSelection?: (startOffset: number, endOffset: number) => void
+  findParagraphByText?: (text: string) => DocParagraph | null
 }
 
 export type UniverApi = {

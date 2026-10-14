@@ -54,6 +54,88 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'activate_sheet',
+      description: 'Activate a sheet by name so subsequent tools operate on it',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_sheet',
+      description: 'Insert a new sheet (becomes active). Optional name and 0-based index.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          index: { type: 'number', description: '0-based position' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'rename_sheet',
+      description: 'Rename a sheet. If name omitted, renames the active sheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          newName: { type: 'string' },
+          name: {
+            type: 'string',
+            description: 'Current sheet name; optional → active',
+          },
+        },
+        required: ['newName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_sheet',
+      description: 'Delete a sheet by name. If name omitted, deletes the active sheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Sheet name; optional → active',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_freeze',
+      description:
+        'Freeze first N rows and/or columns on the active sheet, or clear freeze',
+      parameters: {
+        type: 'object',
+        properties: {
+          rows: {
+            type: 'number',
+            description: 'Number of frozen rows from top',
+          },
+          columns: {
+            type: 'number',
+            description: 'Number of frozen columns from left',
+          },
+          clear: { type: 'boolean', description: 'If true, cancel freeze' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_formulas',
       description:
         'Read formula strings and calculated values from A1 range (or active selection). Prefer this over read_range when you need formulas.',
@@ -300,20 +382,46 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_doc_outline',
-      description: 'Get short plain-text preview of the active document',
-      parameters: { type: 'object', properties: {} },
+      description:
+        'Get document outline: headings preferred, else first paragraphs with style/list flags and offsets',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxItems: { type: 'number', description: 'Default 80' },
+        },
+      },
     },
   },
   {
     type: 'function',
     function: {
       name: 'read_document',
-      description: 'Read document text snapshot body stream (truncated)',
+      description: 'Read document body stream window (truncated)',
       parameters: {
         type: 'object',
         properties: {
           maxChars: { type: 'number' },
+          startOffset: {
+            type: 'number',
+            description: 'Start offset in dataStream',
+          },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_in_document',
+      description: 'Search text in document paragraphs; returns offset hits',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          matchCase: { type: 'boolean' },
+          maxHits: { type: 'number' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -370,19 +478,88 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'insert_paragraph',
+      description:
+        'Insert or append a paragraph. index = 0-based position; omit to append.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+          index: { type: 'number', description: '0-based paragraph index' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_heading',
+      description:
+        'Set paragraph named style (heading/title). paragraphIndex optional → paragraph containing selection.',
+      parameters: {
+        type: 'object',
+        properties: {
+          style: {
+            type: 'string',
+            enum: [
+              'normal',
+              'title',
+              'subtitle',
+              'h1',
+              'h2',
+              'h3',
+              'h4',
+              'h5',
+            ],
+          },
+          paragraphIndex: { type: 'number' },
+        },
+        required: ['style'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_list',
+      description:
+        'Apply or remove list on a paragraph. paragraphIndex optional → selection paragraph.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['bullet', 'ordered', 'check', 'none'],
+          },
+          paragraphIndex: { type: 'number' },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'format_text',
       description:
-        'Apply text styles to the current document selection (bold, italic, fontSize in pt)',
+        'Apply text styles to selection or paragraph (bold, italic, underline, fontSize, color)',
       parameters: {
         type: 'object',
         properties: {
           bold: { type: 'boolean' },
           italic: { type: 'boolean' },
+          underline: { type: 'boolean' },
           fontSize: { type: 'number', description: 'Font size in points' },
+          color: { type: 'string', description: 'Hex color e.g. #333333' },
+          paragraphIndex: {
+            type: 'number',
+            description: 'If no selection, format whole paragraph',
+          },
           at: {
             type: 'string',
             enum: ['selection'],
-            description: 'Only selection is supported',
+            description: 'Prefer selection when present',
           },
         },
       },
@@ -461,9 +638,15 @@ export function toolsForMode(
           'read_range',
           'read_formulas',
           'search_in_sheet',
+          'activate_sheet',
         ]
       : hasDocument && docType === 'DOC'
-        ? ['get_doc_outline', 'get_selection', 'read_document']
+        ? [
+            'get_doc_outline',
+            'get_selection',
+            'read_document',
+            'search_in_document',
+          ]
         : [];
   const write =
     hasDocument && docType === 'SHEET'
@@ -477,9 +660,21 @@ export function toolsForMode(
           'merge_range',
           'set_borders',
           'set_row_heights',
+          'insert_sheet',
+          'rename_sheet',
+          'delete_sheet',
+          'set_freeze',
         ]
       : hasDocument && docType === 'DOC'
-        ? ['replace_text', 'replace_selection', 'insert_text', 'format_text']
+        ? [
+            'replace_text',
+            'replace_selection',
+            'insert_text',
+            'insert_paragraph',
+            'set_heading',
+            'set_list',
+            'format_text',
+          ]
         : [];
   const plan = ['create_plan', 'update_plan'];
   let names: string[] = [];

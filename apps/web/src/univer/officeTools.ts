@@ -1,17 +1,33 @@
-import { BorderStyleTypes, BorderType } from '@univerjs/core'
+import {
+  BorderStyleTypes,
+  BorderType,
+  ICommandService,
+  NamedStyleType,
+  PresetListType,
+} from '@univerjs/core'
+import {
+  BulletListCommand,
+  CheckListCommand,
+  ListOperationCommand,
+  OrderListCommand,
+  SetParagraphNamedStyleCommand,
+} from '@univerjs/docs-ui'
 import {
   a1FromRowCol,
   a1Range,
   estimateA1Area,
   getActiveWorkbook,
   getDocActiveOffsets,
+  getDocSelection,
   getSelectionInfo,
+  getSelectionInjector,
   indexToColLetters,
   parseA1Cell,
   resolveColumnIndex,
+  type SheetHandle,
   type SheetRange,
 } from './selection'
-import type { UniverApi } from './useUniver'
+import type { DocParagraph, UniverApi, UniverDocument } from './useUniver'
 
 export type ChatMode = 'chat' | 'plan' | 'agent'
 
@@ -19,7 +35,212 @@ const READ_MAX_ROWS = 80
 const READ_MAX_COLS = 40
 const READ_MAX_CELLS = 1200
 const SEARCH_MAX_HITS = 50
+const DATA_APPROVE_CELLS = 20
 const FORMAT_APPROVE_CELLS = 50
+const LAYOUT_APPROVE_COUNT = 5
+const DOC_APPROVE_CHARS = 200
+
+const WRITE_TOOL_NAMES = new Set([
+  'set_cells',
+  'set_formulas',
+  'clear_range',
+  'format_range',
+  'set_column_widths',
+  'set_number_format',
+  'merge_range',
+  'set_borders',
+  'set_row_heights',
+  'insert_sheet',
+  'rename_sheet',
+  'delete_sheet',
+  'set_freeze',
+  'replace_text',
+  'replace_selection',
+  'insert_text',
+  'insert_paragraph',
+  'set_heading',
+  'set_list',
+  'format_text',
+])
+
+export type ImpactSummary = { title: string; detail: string }
+
+export function isDocumentWriteTool(name: string): boolean {
+  return WRITE_TOOL_NAMES.has(name)
+}
+
+function gridCellCount(grid: unknown[][] | undefined): number {
+  return grid?.reduce((n, row) => n + (row?.length ?? 0), 0) ?? 0
+}
+
+function resolvedRangeA1(api: UniverApi | null, rangeArg: unknown): string {
+  let a1 = rangeArg != null ? String(rangeArg).trim() : ''
+  if (a1) return a1
+  const wb = getActiveWorkbook(api)
+  if (!wb) return ''
+  const sheet = wb.getActiveSheet()
+  const active = sheet.getActiveRange?.() ?? wb.getActiveRange?.()
+  return active?.getA1Notation?.() ?? ''
+}
+
+function resolvedArea(api: UniverApi | null, rangeArg: unknown): number {
+  const a1 = resolvedRangeA1(api, rangeArg)
+  if (!a1) return 0
+  return estimateA1Area(a1)
+}
+
+export function needsApprove(
+  name: string,
+  args: Record<string, unknown>,
+  api: UniverApi | null,
+): boolean {
+  if (
+    name === 'clear_range' ||
+    name === 'merge_range' ||
+    name === 'replace_text' ||
+    name === 'delete_sheet'
+  ) {
+    return true
+  }
+  if (name === 'set_cells') {
+    return gridCellCount(args.values as unknown[][] | undefined) > DATA_APPROVE_CELLS
+  }
+  if (name === 'set_formulas') {
+    return gridCellCount(args.formulas as unknown[][] | undefined) > DATA_APPROVE_CELLS
+  }
+  if (
+    name === 'format_range' ||
+    name === 'set_number_format' ||
+    name === 'set_borders'
+  ) {
+    return resolvedArea(api, args.range) > FORMAT_APPROVE_CELLS
+  }
+  if (name === 'set_column_widths') {
+    const widths = args.widths as unknown[] | undefined
+    if (Array.isArray(widths) && widths.length > LAYOUT_APPROVE_COUNT) return true
+    const num = Number(args.numColumns)
+    return Number.isFinite(num) && num > LAYOUT_APPROVE_COUNT
+  }
+  if (name === 'set_row_heights') {
+    const heights = args.heights as unknown[] | undefined
+    if (Array.isArray(heights) && heights.length > LAYOUT_APPROVE_COUNT) return true
+    const num = Number(args.numRows)
+    return Number.isFinite(num) && num > LAYOUT_APPROVE_COUNT
+  }
+  if (name === 'replace_selection') return true
+  if (name === 'set_heading' || name === 'set_list') return true
+  if (name === 'insert_text') {
+    const text = String(args.text ?? '')
+    const at = args.at != null ? String(args.at) : 'end'
+    return text.length > DOC_APPROVE_CHARS || at === 'selection'
+  }
+  if (name === 'insert_paragraph') {
+    return String(args.text ?? '').length > DOC_APPROVE_CHARS
+  }
+  if (name === 'format_text') {
+    const sel = getDocSelection(api)
+    const len = sel?.text?.length ?? 0
+    return len > DOC_APPROVE_CHARS
+  }
+  return false
+}
+
+export function describeImpact(
+  name: string,
+  args: Record<string, unknown>,
+  api: UniverApi | null,
+): ImpactSummary {
+  const title = name
+  if (name === 'set_cells') {
+    const cells = gridCellCount(args.values as unknown[][] | undefined)
+    const start = args.start != null ? String(args.start) : 'активная ячейка'
+    return { title, detail: `~${cells} ячеек от ${start}` }
+  }
+  if (name === 'set_formulas') {
+    const cells = gridCellCount(args.formulas as unknown[][] | undefined)
+    const start = args.start != null ? String(args.start) : 'активная ячейка'
+    return { title, detail: `~${cells} формул от ${start}` }
+  }
+  if (
+    name === 'clear_range' ||
+    name === 'merge_range' ||
+    name === 'format_range' ||
+    name === 'set_number_format' ||
+    name === 'set_borders'
+  ) {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    const area = a1 === 'выделение' ? 0 : estimateA1Area(a1)
+    return {
+      title,
+      detail: area > 0 ? `${a1} (~${area} ячеек)` : a1,
+    }
+  }
+  if (name === 'set_column_widths') {
+    const widths = args.widths as unknown[] | undefined
+    const n = Array.isArray(widths)
+      ? widths.length
+      : Number(args.numColumns) || 0
+    return { title, detail: `~${n} столбцов` }
+  }
+  if (name === 'set_row_heights') {
+    const heights = args.heights as unknown[] | undefined
+    const n = Array.isArray(heights)
+      ? heights.length
+      : Number(args.numRows) || 0
+    return { title, detail: `~${n} строк` }
+  }
+  if (name === 'replace_text') {
+    const search = String(args.search ?? '').slice(0, 40)
+    return { title, detail: `замена «${search}»` }
+  }
+  if (name === 'replace_selection' || name === 'insert_text') {
+    const text = String(args.text ?? '')
+    return { title, detail: `~${text.length} символов` }
+  }
+  if (name === 'format_text') {
+    const sel = getDocSelection(api)
+    const len = sel?.text?.length ?? 0
+    return { title, detail: `выделение ~${len} символов` }
+  }
+  if (name === 'insert_paragraph') {
+    return { title, detail: `~${String(args.text ?? '').length} символов` }
+  }
+  if (name === 'set_heading') {
+    return {
+      title,
+      detail: `стиль ${String(args.style ?? '')}${
+        args.paragraphIndex != null ? `, ¶${args.paragraphIndex}` : ''
+      }`,
+    }
+  }
+  if (name === 'set_list') {
+    return {
+      title,
+      detail: `список ${String(args.type ?? '')}${
+        args.paragraphIndex != null ? `, ¶${args.paragraphIndex}` : ''
+      }`,
+    }
+  }
+  if (name === 'delete_sheet' || name === 'rename_sheet' || name === 'insert_sheet') {
+    const sheetName =
+      args.name != null
+        ? String(args.name)
+        : args.newName != null
+          ? String(args.newName)
+          : 'активный лист'
+    return { title, detail: sheetName }
+  }
+  if (name === 'set_freeze') {
+    if (args.clear) return { title, detail: 'снять закрепление' }
+    const rows = args.rows != null ? Number(args.rows) : undefined
+    const cols = args.columns != null ? Number(args.columns) : undefined
+    const parts: string[] = []
+    if (Number.isFinite(rows)) parts.push(`${rows} строк`)
+    if (Number.isFinite(cols)) parts.push(`${cols} столбцов`)
+    return { title, detail: parts.length ? parts.join(', ') : 'закрепление' }
+  }
+  return { title, detail: '' }
+}
 
 export const OFFICE_TOOLS = [
   {
@@ -62,6 +283,76 @@ export const OFFICE_TOOLS = [
         type: 'object',
         properties: { query: { type: 'string' } },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'activate_sheet',
+      description: 'Activate a sheet by name so subsequent tools operate on it',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'insert_sheet',
+      description: 'Insert a new sheet (becomes active). Optional name and 0-based index.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          index: { type: 'number', description: '0-based position' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'rename_sheet',
+      description: 'Rename a sheet. If name omitted, renames the active sheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          newName: { type: 'string' },
+          name: { type: 'string', description: 'Current sheet name; optional → active' },
+        },
+        required: ['newName'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'delete_sheet',
+      description: 'Delete a sheet by name. If name omitted, deletes the active sheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Sheet name; optional → active' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'set_freeze',
+      description:
+        'Freeze first N rows and/or columns on the active sheet, or clear freeze',
+      parameters: {
+        type: 'object',
+        properties: {
+          rows: { type: 'number', description: 'Number of frozen rows from top' },
+          columns: { type: 'number', description: 'Number of frozen columns from left' },
+          clear: { type: 'boolean', description: 'If true, cancel freeze' },
+        },
       },
     },
   },
@@ -287,20 +578,43 @@ export const OFFICE_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'get_doc_outline',
-      description: 'Get short plain-text preview of the active document',
-      parameters: { type: 'object', properties: {} },
+      description:
+        'Get document outline: headings preferred, else first paragraphs with style/list flags and offsets',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxItems: { type: 'number', description: 'Default 80' },
+        },
+      },
     },
   },
   {
     type: 'function' as const,
     function: {
       name: 'read_document',
-      description: 'Read document text snapshot body stream (truncated)',
+      description: 'Read document body stream window (truncated)',
       parameters: {
         type: 'object',
         properties: {
           maxChars: { type: 'number' },
+          startOffset: { type: 'number', description: 'Start offset in dataStream' },
         },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'search_in_document',
+      description: 'Search text in document paragraphs; returns offset hits',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          matchCase: { type: 'boolean' },
+          maxHits: { type: 'number' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -356,19 +670,78 @@ export const OFFICE_TOOLS = [
   {
     type: 'function' as const,
     function: {
+      name: 'insert_paragraph',
+      description: 'Insert or append a paragraph. index = 0-based position; omit to append.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+          index: { type: 'number', description: '0-based paragraph index' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'set_heading',
+      description:
+        'Set paragraph named style (heading/title). paragraphIndex optional → paragraph containing selection.',
+      parameters: {
+        type: 'object',
+        properties: {
+          style: {
+            type: 'string',
+            enum: ['normal', 'title', 'subtitle', 'h1', 'h2', 'h3', 'h4', 'h5'],
+          },
+          paragraphIndex: { type: 'number' },
+        },
+        required: ['style'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'set_list',
+      description:
+        'Apply or remove list on a paragraph. paragraphIndex optional → selection paragraph.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['bullet', 'ordered', 'check', 'none'],
+          },
+          paragraphIndex: { type: 'number' },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'format_text',
       description:
-        'Apply text styles to the current document selection (bold, italic, fontSize in pt)',
+        'Apply text styles to selection or paragraph (bold, italic, underline, fontSize, color)',
       parameters: {
         type: 'object',
         properties: {
           bold: { type: 'boolean' },
           italic: { type: 'boolean' },
+          underline: { type: 'boolean' },
           fontSize: { type: 'number', description: 'Font size in points' },
+          color: { type: 'string', description: 'Hex color e.g. #333333' },
+          paragraphIndex: {
+            type: 'number',
+            description: 'If no selection, format whole paragraph',
+          },
           at: {
             type: 'string',
             enum: ['selection'],
-            description: 'Only selection is supported',
+            description: 'Prefer selection when present',
           },
         },
       },
@@ -441,9 +814,15 @@ export function toolsForMode(
           'read_range',
           'read_formulas',
           'search_in_sheet',
+          'activate_sheet',
         ]
       : hasDocument && docType === 'DOC'
-        ? ['get_doc_outline', 'get_selection', 'read_document']
+        ? [
+            'get_doc_outline',
+            'get_selection',
+            'read_document',
+            'search_in_document',
+          ]
         : []
   const write =
     hasDocument && docType === 'SHEET'
@@ -457,9 +836,21 @@ export function toolsForMode(
           'merge_range',
           'set_borders',
           'set_row_heights',
+          'insert_sheet',
+          'rename_sheet',
+          'delete_sheet',
+          'set_freeze',
         ]
       : hasDocument && docType === 'DOC'
-        ? ['replace_text', 'replace_selection', 'insert_text', 'format_text']
+        ? [
+            'replace_text',
+            'replace_selection',
+            'insert_text',
+            'insert_paragraph',
+            'set_heading',
+            'set_list',
+            'format_text',
+          ]
         : []
   const plan = ['create_plan', 'update_plan']
   let names: string[] = []
@@ -470,36 +861,6 @@ export function toolsForMode(
     if (buildingPlan) names.push('update_plan')
   }
   return OFFICE_TOOLS.filter((t) => names.includes(t.function.name))
-}
-
-export function isMassWrite(name: string, args: Record<string, unknown>) {
-  if (name === 'clear_range') return true
-  if (name === 'merge_range') return true
-  if (name === 'set_cells') {
-    const values = args.values as unknown[][] | undefined
-    const cells = values?.reduce((n, row) => n + (row?.length ?? 0), 0) ?? 0
-    return cells > 20
-  }
-  if (name === 'set_formulas') {
-    const formulas = args.formulas as unknown[][] | undefined
-    const cells = formulas?.reduce((n, row) => n + (row?.length ?? 0), 0) ?? 0
-    return cells > 20
-  }
-  if (
-    name === 'format_range' ||
-    name === 'set_number_format' ||
-    name === 'set_borders'
-  ) {
-    const range = args.range != null ? String(args.range).trim() : ''
-    if (!range) return false
-    return estimateA1Area(range) > FORMAT_APPROVE_CELLS
-  }
-  if (name === 'set_column_widths') return false
-  if (name === 'set_row_heights') return false
-  if (name === 'format_text') return false
-  if (name === 'replace_text') return true
-  if (name === 'replace_selection') return true
-  return false
 }
 
 function mapBorderType(value: string): BorderType | null {
@@ -531,8 +892,109 @@ function mapBorderStyle(value: string): BorderStyleTypes | null {
   return map[value] ?? null
 }
 
+const HEADING_STYLE_MAP: Record<string, NamedStyleType> = {
+  normal: NamedStyleType.NORMAL_TEXT,
+  title: NamedStyleType.TITLE,
+  subtitle: NamedStyleType.SUBTITLE,
+  h1: NamedStyleType.HEADING_1,
+  h2: NamedStyleType.HEADING_2,
+  h3: NamedStyleType.HEADING_3,
+  h4: NamedStyleType.HEADING_4,
+  h5: NamedStyleType.HEADING_5,
+}
+
+const HEADING_STYLE_LABEL: Partial<Record<NamedStyleType, string>> = {
+  [NamedStyleType.NORMAL_TEXT]: 'normal',
+  [NamedStyleType.TITLE]: 'title',
+  [NamedStyleType.SUBTITLE]: 'subtitle',
+  [NamedStyleType.HEADING_1]: 'h1',
+  [NamedStyleType.HEADING_2]: 'h2',
+  [NamedStyleType.HEADING_3]: 'h3',
+  [NamedStyleType.HEADING_4]: 'h4',
+  [NamedStyleType.HEADING_5]: 'h5',
+}
+
+function isHeadingStyle(style: NamedStyleType | undefined): boolean {
+  if (style == null) return false
+  return (
+    style === NamedStyleType.TITLE ||
+    style === NamedStyleType.SUBTITLE ||
+    style === NamedStyleType.HEADING_1 ||
+    style === NamedStyleType.HEADING_2 ||
+    style === NamedStyleType.HEADING_3 ||
+    style === NamedStyleType.HEADING_4 ||
+    style === NamedStyleType.HEADING_5
+  )
+}
+
+function resolveDocParagraph(
+  doc: UniverDocument,
+  paragraphIndexArg: unknown,
+): { paragraph: DocParagraph; index: number } | { error: string } {
+  const paragraphs = typeof doc.getParagraphs === 'function' ? doc.getParagraphs() : []
+  if (!paragraphs.length) return { error: 'no paragraphs' }
+
+  if (paragraphIndexArg != null && String(paragraphIndexArg).trim() !== '') {
+    const index = Number(paragraphIndexArg)
+    if (!Number.isInteger(index) || index < 0 || index >= paragraphs.length) {
+      return { error: `invalid paragraphIndex: ${String(paragraphIndexArg)}` }
+    }
+    return { paragraph: paragraphs[index], index }
+  }
+
+  const offsets = getDocActiveOffsets()
+  if (offsets) {
+    const mid = Math.floor((offsets.startOffset + offsets.endOffset) / 2)
+    for (let i = 0; i < paragraphs.length; i++) {
+      const info = paragraphs[i].getInfo?.()
+      if (!info) continue
+      if (mid >= info.startOffset && mid <= info.endOffset) {
+        return { paragraph: paragraphs[i], index: info.paragraphIndex ?? i }
+      }
+    }
+  }
+
+  return { paragraph: paragraphs[0], index: 0 }
+}
+
+async function executeDocCommand(
+  id: string,
+  params?: Record<string, unknown>,
+): Promise<boolean> {
+  const injector = getSelectionInjector()
+  if (!injector) return false
+  try {
+    const commandService = injector.get(ICommandService) as {
+      executeCommand: (
+        commandId: string,
+        params?: Record<string, unknown>,
+      ) => boolean | Promise<boolean>
+    }
+    return Boolean(await commandService.executeCommand(id, params))
+  } catch {
+    return false
+  }
+}
+
+function resolveSheetByName(
+  wb: NonNullable<ReturnType<typeof getActiveWorkbook>>,
+  nameArg: unknown,
+  allowActiveFallback: boolean,
+): { sheet: SheetHandle } | { error: string } {
+  const name = nameArg != null ? String(nameArg).trim() : ''
+  if (!name) {
+    if (!allowActiveFallback) return { error: 'sheet name required' }
+    return { sheet: wb.getActiveSheet() }
+  }
+  const byName = wb.getSheetByName?.(name)
+  if (byName) return { sheet: byName }
+  const match = wb.getSheets().find((s) => s.getSheetName() === name)
+  if (match) return { sheet: match }
+  return { error: `sheet not found: ${name}` }
+}
+
 function resolveSheetRangeA1(
-  sheet: ReturnType<NonNullable<ReturnType<typeof getActiveWorkbook>>['getActiveSheet']>,
+  sheet: SheetHandle,
   wb: NonNullable<ReturnType<typeof getActiveWorkbook>>,
   rangeArg: unknown,
 ): { a1: string; range: SheetRange } | { error: string } {
@@ -634,7 +1096,150 @@ export async function runOfficeTool(
         rows: sheet.getMaxRows(),
         cols: sheet.getMaxColumns(),
         usedRange,
+        frozenRows: sheet.getFrozenRows?.() ?? 0,
+        frozenColumns: sheet.getFrozenColumns?.() ?? 0,
       })
+    }
+    if (name === 'activate_sheet') {
+      try {
+        const resolved = resolveSheetByName(wb, args.name, false)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        if (resolved.sheet.activate) resolved.sheet.activate()
+        else if (wb.setActiveSheet) wb.setActiveSheet(resolved.sheet)
+        else return JSON.stringify({ error: 'activate_sheet not supported' })
+        return JSON.stringify({
+          ok: true,
+          active: resolved.sheet.getSheetName(),
+          sheets: wb.getSheets().map((s) => s.getSheetName()),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'activate_sheet failed',
+        })
+      }
+    }
+    if (name === 'insert_sheet') {
+      try {
+        if (!wb.insertSheet) return JSON.stringify({ error: 'insert_sheet not supported' })
+        const sheetName =
+          args.name != null && String(args.name).trim()
+            ? String(args.name).trim()
+            : undefined
+        const index =
+          args.index != null && Number.isFinite(Number(args.index))
+            ? Number(args.index)
+            : undefined
+        const created = wb.insertSheet(
+          sheetName,
+          index != null ? { index } : undefined,
+        )
+        const active = created ?? wb.getActiveSheet()
+        return JSON.stringify({
+          ok: true,
+          sheet: active.getSheetName(),
+          sheets: wb.getSheets().map((s) => s.getSheetName()),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'insert_sheet failed',
+        })
+      }
+    }
+    if (name === 'rename_sheet') {
+      try {
+        const newName = String(args.newName ?? '').trim()
+        if (!newName) return JSON.stringify({ error: 'newName required' })
+        const resolved = resolveSheetByName(wb, args.name, true)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        if (!resolved.sheet.setName) {
+          return JSON.stringify({ error: 'rename_sheet not supported' })
+        }
+        const oldName = resolved.sheet.getSheetName()
+        resolved.sheet.setName(newName)
+        return JSON.stringify({
+          ok: true,
+          from: oldName,
+          to: resolved.sheet.getSheetName(),
+          sheets: wb.getSheets().map((s) => s.getSheetName()),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'rename_sheet failed',
+        })
+      }
+    }
+    if (name === 'delete_sheet') {
+      try {
+        if (!wb.deleteSheet) return JSON.stringify({ error: 'delete_sheet not supported' })
+        const resolved = resolveSheetByName(wb, args.name, true)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const deletedName = resolved.sheet.getSheetName()
+        if (wb.getSheets().length <= 1) {
+          return JSON.stringify({ error: 'cannot delete the only sheet' })
+        }
+        const ok = wb.deleteSheet(resolved.sheet)
+        if (!ok) return JSON.stringify({ error: 'delete_sheet failed' })
+        return JSON.stringify({
+          ok: true,
+          deleted: deletedName,
+          active: wb.getActiveSheet().getSheetName(),
+          sheets: wb.getSheets().map((s) => s.getSheetName()),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'delete_sheet failed',
+        })
+      }
+    }
+    if (name === 'set_freeze') {
+      try {
+        if (args.clear) {
+          if (!sheet.cancelFreeze) {
+            return JSON.stringify({ error: 'set_freeze not supported' })
+          }
+          sheet.cancelFreeze()
+          return JSON.stringify({
+            ok: true,
+            cleared: true,
+            sheet: sheet.getSheetName(),
+          })
+        }
+        const rows =
+          args.rows != null && Number.isFinite(Number(args.rows))
+            ? Math.max(0, Math.floor(Number(args.rows)))
+            : undefined
+        const columns =
+          args.columns != null && Number.isFinite(Number(args.columns))
+            ? Math.max(0, Math.floor(Number(args.columns)))
+            : undefined
+        if (rows == null && columns == null) {
+          return JSON.stringify({
+            error: 'pass rows and/or columns, or clear: true',
+          })
+        }
+        if (rows != null) {
+          if (!sheet.setFrozenRows) {
+            return JSON.stringify({ error: 'set_freeze not supported' })
+          }
+          sheet.setFrozenRows(rows)
+        }
+        if (columns != null) {
+          if (!sheet.setFrozenColumns) {
+            return JSON.stringify({ error: 'set_freeze not supported' })
+          }
+          sheet.setFrozenColumns(columns)
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          frozenRows: sheet.getFrozenRows?.() ?? rows ?? 0,
+          frozenColumns: sheet.getFrozenColumns?.() ?? columns ?? 0,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'set_freeze failed',
+        })
+      }
     }
     if (name === 'read_range') {
       try {
@@ -1163,12 +1768,217 @@ export async function runOfficeTool(
       doc.save()?.body?.dataStream ??
       ''
 
-    if (name === 'get_doc_outline' || name === 'read_document') {
-      const max = Number(args.maxChars ?? 4000)
+    if (name === 'get_doc_outline') {
+      try {
+        const maxItems = Math.min(
+          200,
+          Math.max(1, Number(args.maxItems ?? 80) || 80),
+        )
+        const paragraphs =
+          typeof doc.getParagraphs === 'function' ? doc.getParagraphs() : []
+        const mapped = paragraphs.map((p, i) => {
+          const info = p.getInfo?.()
+          const named = info?.paragraph?.paragraphStyle?.namedStyleType as
+            | NamedStyleType
+            | undefined
+          const styleLabel =
+            named != null ? HEADING_STYLE_LABEL[named] ?? String(named) : 'normal'
+          return {
+            index: info?.paragraphIndex ?? i,
+            id: p.getId?.() ?? '',
+            text: p.getText().slice(0, 120),
+            namedStyle: styleLabel,
+            isHeading: isHeadingStyle(named),
+            isList: Boolean(p.isListItem?.()),
+            startOffset: info?.startOffset ?? null,
+            endOffset: info?.endOffset ?? null,
+          }
+        })
+        const headings = mapped.filter((item) => item.isHeading)
+        const items = (headings.length ? headings : mapped).slice(0, maxItems)
+        return JSON.stringify({
+          count: items.length,
+          totalParagraphs: mapped.length,
+          headingsOnly: headings.length > 0,
+          items,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'get_doc_outline failed',
+        })
+      }
+    }
+    if (name === 'read_document') {
+      const max = Math.max(1, Number(args.maxChars ?? 4000) || 4000)
+      const start = Math.max(0, Number(args.startOffset ?? 0) || 0)
+      const text = stream.slice(start, start + max)
       return JSON.stringify({
         length: stream.length,
-        text: stream.slice(0, max),
+        startOffset: start,
+        text,
+        truncated: start + text.length < stream.length,
       })
+    }
+    if (name === 'search_in_document') {
+      try {
+        const query = String(args.query ?? '')
+        if (!query) return JSON.stringify({ error: 'empty query' })
+        const matchCase = Boolean(args.matchCase)
+        const maxHits = Math.min(
+          100,
+          Math.max(1, Number(args.maxHits ?? SEARCH_MAX_HITS) || SEARCH_MAX_HITS),
+        )
+        const paragraphs =
+          typeof doc.getParagraphs === 'function' ? doc.getParagraphs() : []
+        const hits: Array<{
+          paragraphIndex: number
+          paragraphId: string
+          startOffset: number | null
+          endOffset: number | null
+          preview: string
+        }> = []
+        for (let i = 0; i < paragraphs.length; i++) {
+          const p = paragraphs[i]
+          if (typeof p.findAllText !== 'function') continue
+          const ranges = p.findAllText(query, { matchCase })
+          const info = p.getInfo?.()
+          for (const range of ranges) {
+            const desc = range.describe?.()
+            hits.push({
+              paragraphIndex: info?.paragraphIndex ?? i,
+              paragraphId: p.getId?.() ?? '',
+              startOffset: desc?.startOffset ?? null,
+              endOffset: desc?.endOffset ?? null,
+              preview: (range.getText?.() ?? p.getText()).slice(0, 80),
+            })
+            if (hits.length >= maxHits) break
+          }
+          if (hits.length >= maxHits) break
+        }
+        return JSON.stringify({
+          query,
+          hits,
+          truncated: hits.length >= maxHits,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'search_in_document failed',
+        })
+      }
+    }
+    if (name === 'insert_paragraph') {
+      try {
+        const text = String(args.text ?? '')
+        if (args.index != null && Number.isInteger(Number(args.index))) {
+          const index = Number(args.index)
+          if (!doc.insertParagraph) {
+            return JSON.stringify({ error: 'insertParagraph unavailable' })
+          }
+          const p = doc.insertParagraph(index, text)
+          const info = p.getInfo?.()
+          return JSON.stringify({
+            ok: true,
+            index: info?.paragraphIndex ?? index,
+            text: p.getText().slice(0, 120),
+          })
+        }
+        if (typeof doc.appendParagraph !== 'function') {
+          return JSON.stringify({ error: 'appendParagraph unavailable' })
+        }
+        const p = doc.appendParagraph(text)
+        const info = p.getInfo?.()
+        return JSON.stringify({
+          ok: true,
+          index: info?.paragraphIndex ?? null,
+          text: p.getText().slice(0, 120),
+          appended: true,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'insert_paragraph failed',
+        })
+      }
+    }
+    if (name === 'set_heading') {
+      try {
+        const styleKey = String(args.style ?? '').toLowerCase()
+        const named = HEADING_STYLE_MAP[styleKey]
+        if (named == null) {
+          return JSON.stringify({
+            error: 'style must be normal|title|subtitle|h1|h2|h3|h4|h5',
+          })
+        }
+        const resolved = resolveDocParagraph(doc, args.paragraphIndex)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const info = resolved.paragraph.getInfo?.()
+        if (info && doc.setSelection) {
+          doc.setSelection(info.startOffset, Math.max(info.startOffset, info.endOffset))
+        }
+        let ok = false
+        if (typeof resolved.paragraph.setStyle === 'function') {
+          ok = resolved.paragraph.setStyle({ namedStyleType: named })
+        }
+        if (!ok) {
+          ok = await executeDocCommand(SetParagraphNamedStyleCommand.id, {
+            value: named,
+          })
+        }
+        if (!ok) return JSON.stringify({ error: 'set_heading failed' })
+        return JSON.stringify({
+          ok: true,
+          style: styleKey,
+          paragraphIndex: resolved.index,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'set_heading failed',
+        })
+      }
+    }
+    if (name === 'set_list') {
+      try {
+        const listType = String(args.type ?? '').toLowerCase()
+        if (!['bullet', 'ordered', 'check', 'none'].includes(listType)) {
+          return JSON.stringify({
+            error: 'type must be bullet|ordered|check|none',
+          })
+        }
+        const resolved = resolveDocParagraph(doc, args.paragraphIndex)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const info = resolved.paragraph.getInfo?.()
+        if (info && doc.setSelection) {
+          doc.setSelection(info.startOffset, Math.max(info.startOffset, info.endOffset))
+        }
+        let ok = false
+        if (listType === 'none') {
+          if (resolved.paragraph.isListItem?.()) {
+            ok = await executeDocCommand(BulletListCommand.id)
+          } else {
+            ok = true
+          }
+        } else if (listType === 'bullet') {
+          ok = await executeDocCommand(BulletListCommand.id)
+        } else if (listType === 'ordered') {
+          ok = await executeDocCommand(OrderListCommand.id)
+        } else if (listType === 'check') {
+          ok =
+            (await executeDocCommand(CheckListCommand.id)) ||
+            (await executeDocCommand(ListOperationCommand.id, {
+              listType: PresetListType.CHECK_LIST,
+            }))
+        }
+        if (!ok) return JSON.stringify({ error: 'set_list failed' })
+        return JSON.stringify({
+          ok: true,
+          type: listType,
+          paragraphIndex: resolved.index,
+          isList: Boolean(resolved.paragraph.isListItem?.()),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'set_list failed',
+        })
+      }
     }
     if (name === 'insert_text') {
       const text = String(args.text ?? '')
@@ -1255,16 +2065,39 @@ export async function runOfficeTool(
     }
     if (name === 'format_text') {
       try {
+        let startOffset: number | null = null
+        let endOffset: number | null = null
         const offsets = getDocActiveOffsets()
-        if (!offsets) return JSON.stringify({ error: 'no active selection' })
-        const { startOffset, endOffset } = offsets
-        if (startOffset === endOffset) {
+        if (offsets && offsets.startOffset !== offsets.endOffset) {
+          startOffset = offsets.startOffset
+          endOffset = offsets.endOffset
+        } else if (args.paragraphIndex != null) {
+          const resolved = resolveDocParagraph(doc, args.paragraphIndex)
+          if ('error' in resolved) return JSON.stringify(resolved)
+          const info = resolved.paragraph.getInfo?.()
+          if (!info) return JSON.stringify({ error: 'paragraph offsets unavailable' })
+          startOffset = info.startOffset
+          endOffset = info.endOffset
+        } else if (offsets) {
           return JSON.stringify({ error: 'selection is empty (cursor only)' })
+        } else {
+          return JSON.stringify({
+            error: 'no selection; pass paragraphIndex or select text',
+          })
+        }
+        if (startOffset == null || endOffset == null || startOffset === endOffset) {
+          return JSON.stringify({ error: 'empty range' })
         }
         if (typeof doc.getTextRange !== 'function') {
           return JSON.stringify({ error: 'getTextRange unavailable' })
         }
-        const style: { bl?: number; it?: number; fs?: number } = {}
+        const style: {
+          bl?: number
+          it?: number
+          fs?: number
+          ul?: { s?: number }
+          cl?: { rgb?: string }
+        } = {}
         const applied: string[] = []
         if (typeof args.bold === 'boolean') {
           style.bl = args.bold ? 1 : 0
@@ -1274,9 +2107,17 @@ export async function runOfficeTool(
           style.it = args.italic ? 1 : 0
           applied.push(args.italic ? 'italic' : 'unitalic')
         }
+        if (typeof args.underline === 'boolean') {
+          style.ul = { s: args.underline ? 1 : 0 }
+          applied.push(args.underline ? 'underline' : 'nounderline')
+        }
         if (args.fontSize != null) {
           style.fs = Number(args.fontSize)
           applied.push(`fontSize:${style.fs}`)
+        }
+        if (args.color != null && String(args.color).trim()) {
+          style.cl = { rgb: String(args.color).trim() }
+          applied.push(`color:${style.cl.rgb}`)
         }
         if (!applied.length) {
           return JSON.stringify({ error: 'no style properties provided' })

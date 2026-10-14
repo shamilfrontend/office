@@ -43,26 +43,40 @@ export type SheetRange = {
   breakApart?: () => unknown
 }
 
-export type SheetApi = {
-  getActiveSheet: () => {
-    getSheetName: () => string
-    getActiveRange: () => SheetRange | null
-    getActiveCell: () => SheetRange | null
-    getRange: {
-      (a1: string): SheetRange
-      (row: number, column: number, numRows: number, numColumns: number): SheetRange
-    }
-    getMaxRows: () => number
-    getMaxColumns: () => number
-    getDataRange: () => SheetRange
-    setColumnWidth?: (columnPosition: number, width: number) => unknown
-    setColumnWidths?: (startColumn: number, numColumn: number, width: number) => unknown
-    setRowHeight?: (rowPosition: number, height: number) => unknown
-    setRowHeights?: (startRow: number, numRows: number, height: number) => unknown
+export type SheetHandle = {
+  getSheetName: () => string
+  getSheetId?: () => string
+  getActiveRange: () => SheetRange | null
+  getActiveCell: () => SheetRange | null
+  getRange: {
+    (a1: string): SheetRange
+    (row: number, column: number, numRows: number, numColumns: number): SheetRange
   }
+  getMaxRows: () => number
+  getMaxColumns: () => number
+  getDataRange: () => SheetRange
+  setName?: (name: string) => unknown
+  activate?: () => unknown
+  setColumnWidth?: (columnPosition: number, width: number) => unknown
+  setColumnWidths?: (startColumn: number, numColumn: number, width: number) => unknown
+  setRowHeight?: (rowPosition: number, height: number) => unknown
+  setRowHeights?: (startRow: number, numRows: number, height: number) => unknown
+  setFrozenRows?: (rows: number) => unknown
+  setFrozenColumns?: (columns: number) => unknown
+  cancelFreeze?: () => unknown
+  getFrozenRows?: () => number
+  getFrozenColumns?: () => number
+}
+
+export type SheetApi = {
+  getActiveSheet: () => SheetHandle
   getActiveRange?: () => SheetRange | null
   getActiveCell?: () => SheetRange | null
-  getSheets: () => Array<{ getSheetName: () => string }>
+  getSheets: () => SheetHandle[]
+  getSheetByName?: (name: string) => SheetHandle | null
+  insertSheet?: (name?: string, options?: { index?: number }) => SheetHandle | null
+  deleteSheet?: (sheet: SheetHandle | string) => boolean
+  setActiveSheet?: (sheet: SheetHandle | string) => unknown
 }
 
 /** Estimate cell count of an A1 range (e.g. A1:C10 → 30). */
@@ -100,6 +114,10 @@ let currentInjector: InjectorLike | null = null
 
 export function setSelectionInjector(injector: InjectorLike | null) {
   currentInjector = injector
+}
+
+export function getSelectionInjector(): InjectorLike | null {
+  return currentInjector
 }
 
 export function parseA1Cell(a1: string): { row: number; col: number } | null {

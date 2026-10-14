@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, shallowRef } from 'vue'
+import { setSelectionInjector } from './selection'
 
 export type DocTextRange = {
   setText: (text: string) => boolean
@@ -21,6 +22,7 @@ export type UniverDocument = {
   appendParagraph: (text?: string, segmentId?: string) => DocParagraph
   getParagraphs: (segmentId?: string) => DocParagraph[]
   deleteRange: (range: { startOffset: number; endOffset: number; segmentId?: string }) => boolean
+  getTextRange?: (startOffset: number, endOffset: number, segmentId?: string) => DocTextRange
 }
 
 export type UniverApi = {
@@ -35,7 +37,10 @@ export type UniverApi = {
 export function useUniverHost() {
   const container = ref<HTMLElement | null>(null)
   const api = shallowRef<UniverApi | null>(null)
-  const univerRef = shallowRef<{ dispose: () => void } | null>(null)
+  const univerRef = shallowRef<{
+    dispose: () => void
+    __getInjector: () => { get: (token: unknown) => unknown }
+  } | null>(null)
   const unitId = ref<string | null>(null)
 
   async function mountSheet(snapshot?: object) {
@@ -71,8 +76,13 @@ export function useUniverHost() {
         UniverSheetsDrawingPreset(),
       ],
     })
-    univerRef.value = created.univer as { dispose: () => void }
+    const univer = created.univer as {
+      dispose: () => void
+      __getInjector: () => { get: (token: unknown) => unknown }
+    }
+    univerRef.value = univer
     api.value = created.univerAPI as unknown as UniverApi
+    setSelectionInjector(univer.__getInjector())
     const wb = api.value.createWorkbook(snapshot ?? {}) as { getId: () => string }
     unitId.value = wb.getId?.() ?? null
   }
@@ -100,8 +110,13 @@ export function useUniverHost() {
         }),
       ],
     })
-    univerRef.value = created.univer as { dispose: () => void }
+    const univer = created.univer as {
+      dispose: () => void
+      __getInjector: () => { get: (token: unknown) => unknown }
+    }
+    univerRef.value = univer
     api.value = created.univerAPI as unknown as UniverApi
+    setSelectionInjector(univer.__getInjector())
     const doc = api.value.createDocument(snapshot ?? {}) as {
       getId: () => string
     }
@@ -132,6 +147,7 @@ export function useUniverHost() {
     api.value = null
     univerRef.value = null
     unitId.value = null
+    setSelectionInjector(null)
     if (container.value) container.value.innerHTML = ''
   }
 

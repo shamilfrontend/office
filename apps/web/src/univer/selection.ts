@@ -1,0 +1,277 @@
+import { DocSelectionManagerService } from '@univerjs/docs'
+import type { UniverApi, UniverDocument } from './useUniver'
+
+export type SheetSelectionInfo = {
+  kind: 'SHEET'
+  sheet: string
+  range: string | null
+  cell: string | null
+  preview: string[][] | null
+  truncated: boolean
+}
+
+export type DocSelectionInfo = {
+  kind: 'DOC'
+  startOffset: number | null
+  endOffset: number | null
+  text: string | null
+  collapsed: boolean | null
+}
+
+export type SelectionInfo = SheetSelectionInfo | DocSelectionInfo | { kind: 'none'; reason: string }
+
+type SheetRange = {
+  getA1Notation: (withSheet?: boolean) => string
+  getValues: () => unknown[][]
+  getDisplayValues?: () => string[][]
+  getRange?: () => { startRow: number; startColumn: number; endRow: number; endColumn: number }
+}
+
+type SheetApi = {
+  getActiveSheet: () => {
+    getSheetName: () => string
+    getActiveRange: () => SheetRange | null
+    getActiveCell: () => SheetRange | null
+    getRange: {
+      (a1: string): SheetRange & {
+        setValues: (v: unknown[][]) => void
+        clear: () => void
+      }
+      (row: number, column: number, numRows: number, numColumns: number): SheetRange & {
+        setValues: (v: unknown[][]) => void
+        clear: () => void
+      }
+    }
+    getMaxRows: () => number
+    getMaxColumns: () => number
+    getDataRange: () => SheetRange
+  }
+  getActiveRange?: () => SheetRange | null
+  getActiveCell?: () => SheetRange | null
+  getSheets: () => Array<{ getSheetName: () => string }>
+}
+
+type InjectorLike = {
+  get: (token: unknown) => unknown
+}
+
+let currentInjector: InjectorLike | null = null
+
+export function setSelectionInjector(injector: InjectorLike | null) {
+  currentInjector = injector
+}
+
+export function parseA1Cell(a1: string): { row: number; col: number } | null {
+  const m = String(a1 || '')
+    .trim()
+    .replace(/^[^!]*!/, '')
+    .match(/^\$?([A-Za-z]+)\$?(\d+)$/)
+  if (!m) return null
+  return { col: colLettersToIndex(m[1]), row: Number(m[2]) - 1 }
+}
+
+export function colLettersToIndex(col: string): number {
+  let n = 0
+  for (const ch of col.toUpperCase()) {
+    if (ch < 'A' || ch > 'Z') return -1
+    n = n * 26 + (ch.charCodeAt(0) - 64)
+  }
+  return n - 1
+}
+
+export function indexToColLetters(col: number): string {
+  let n = col + 1
+  let s = ''
+  while (n > 0) {
+    const r = (n - 1) % 26
+    s = String.fromCharCode(65 + r) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
+}
+
+export function a1FromRowCol(row: number, col: number): string {
+  return `${indexToColLetters(col)}${row + 1}`
+}
+
+export function a1Range(startRow: number, startCol: number, numRows: number, numCols: number): string {
+  const endRow = startRow + Math.max(1, numRows) - 1
+  const endCol = startCol + Math.max(1, numCols) - 1
+  const start = a1FromRowCol(startRow, startCol)
+  const end = a1FromRowCol(endRow, endCol)
+  return start === end ? start : `${start}:${end}`
+}
+
+const PREVIEW_MAX_ROWS = 20
+const PREVIEW_MAX_COLS = 10
+const PREVIEW_MAX_CELLS = 200
+const DOC_TEXT_CAP = 500
+
+function capMatrix(values: unknown[][]): { values: unknown[][]; truncated: boolean } {
+  const rows = values.length
+  const cols = values.reduce((m, row) => Math.max(m, row?.length ?? 0), 0)
+  const cells = rows * Math.max(cols, 1)
+  if (rows <= PREVIEW_MAX_ROWS && cols <= PREVIEW_MAX_COLS && cells <= PREVIEW_MAX_CELLS) {
+    return { values, truncated: false }
+  }
+  const sliced = values.slice(0, PREVIEW_MAX_ROWS).map((row) =>
+    (row ?? []).slice(0, PREVIEW_MAX_COLS),
+  )
+  return { values: sliced, truncated: true }
+}
+
+export function getActiveWorkbook(api: UniverApi | null): SheetApi | null {
+  if (!api) return null
+  return (api.getActiveWorkbook() as unknown as SheetApi | null) ?? null
+}
+
+export function getSheetSelection(api: UniverApi | null): SheetSelectionInfo | null {
+  const wb = getActiveWorkbook(api)
+  if (!wb) return null
+  try {
+    const sheet = wb.getActiveSheet()
+    const activeRange = sheet.getActiveRange?.() ?? wb.getActiveRange?.() ?? null
+    const activeCell = sheet.getActiveCell?.() ?? wb.getActiveCell?.() ?? null
+    let preview: string[][] | null = null
+    let truncated = false
+    if (activeRange) {
+      const raw =
+        typeof activeRange.getDisplayValues === 'function'
+          ? activeRange.getDisplayValues()
+          : (activeRange.getValues() as unknown[][]).map((row) =>
+              row.map((cell) => (cell == null ? '' : String(cell))),
+            )
+      const capped = capMatrix(raw)
+      preview = capped.values as string[][]
+      truncated = capped.truncated
+    }
+    return {
+      kind: 'SHEET',
+      sheet: sheet.getSheetName(),
+      range: activeRange?.getA1Notation?.() ?? null,
+      cell: activeCell?.getA1Notation?.() ?? null,
+      preview,
+      truncated,
+    }
+  } catch {
+    return null
+  }
+}
+
+function getDocStream(doc: UniverDocument): string {
+  return (
+    doc.getBody?.()?.dataStream ??
+    (typeof doc.getSnapshot === 'function' ? doc.getSnapshot()?.body?.dataStream : undefined) ??
+    doc.save()?.body?.dataStream ??
+    ''
+  )
+}
+
+export function getDocActiveOffsets(): {
+  startOffset: number
+  endOffset: number
+} | null {
+  if (!currentInjector) return null
+  try {
+    const svc = currentInjector.get(DocSelectionManagerService) as {
+      getActiveTextRange?: () => { startOffset?: number; endOffset?: number } | null
+    }
+    const range = svc?.getActiveTextRange?.()
+    if (
+      !range ||
+      typeof range.startOffset !== 'number' ||
+      typeof range.endOffset !== 'number'
+    ) {
+      return null
+    }
+    return { startOffset: range.startOffset, endOffset: range.endOffset }
+  } catch {
+    return null
+  }
+}
+
+export function getDocSelection(api: UniverApi | null): DocSelectionInfo | null {
+  const doc = api?.getActiveDocument?.() ?? null
+  if (!doc) return null
+  try {
+    const offsets = getDocActiveOffsets()
+    if (!offsets) {
+      return {
+        kind: 'DOC',
+        startOffset: null,
+        endOffset: null,
+        text: null,
+        collapsed: null,
+      }
+    }
+    const { startOffset, endOffset } = offsets
+    let text = ''
+    try {
+      if (typeof doc.getTextRange === 'function') {
+        text = doc.getTextRange(startOffset, endOffset).getText?.() ?? ''
+      } else {
+        text = getDocStream(doc).slice(startOffset, endOffset)
+      }
+    } catch {
+      text = getDocStream(doc).slice(startOffset, endOffset)
+    }
+    const capped =
+      text.length > DOC_TEXT_CAP ? `${text.slice(0, DOC_TEXT_CAP)}…` : text
+    return {
+      kind: 'DOC',
+      startOffset,
+      endOffset,
+      text: capped,
+      collapsed: startOffset === endOffset,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function getSelectionInfo(
+  api: UniverApi | null,
+  docType: 'SHEET' | 'DOC',
+): SelectionInfo {
+  if (!api) return { kind: 'none', reason: 'editor not ready' }
+  if (docType === 'SHEET') {
+    return getSheetSelection(api) ?? { kind: 'none', reason: 'no sheet selection' }
+  }
+  return getDocSelection(api) ?? { kind: 'none', reason: 'no doc selection' }
+}
+
+export function formatSelectionContext(
+  api: UniverApi | null,
+  docType: 'SHEET' | 'DOC',
+  meta?: { docName?: string },
+): string {
+  const lines: string[] = []
+  if (meta?.docName) lines.push(`Документ: ${meta.docName} (${docType})`)
+  const info = getSelectionInfo(api, docType)
+  if (info.kind === 'none') {
+    lines.push(`Выделение: недоступно (${info.reason}). Используй tools для чтения.`)
+    return lines.join('\n')
+  }
+  if (info.kind === 'SHEET') {
+    lines.push(`Активный лист: ${info.sheet}`)
+    if (info.range) lines.push(`Выделение: ${info.range}`)
+    if (info.cell) lines.push(`Активная ячейка: ${info.cell}`)
+    if (info.preview) {
+      lines.push(
+        `Превью выделения${info.truncated ? ' (обрезано)' : ''}: ${JSON.stringify(info.preview)}`,
+      )
+    }
+    if (!info.range && !info.cell) {
+      lines.push('Выделение: нет активного range. Используй get_selection / read_range.')
+    }
+    return lines.join('\n')
+  }
+  if (info.startOffset == null || info.endOffset == null) {
+    lines.push('Выделение: нет активного текстового range. Используй get_selection.')
+    return lines.join('\n')
+  }
+  lines.push(`Выделение: offsets ${info.startOffset}–${info.endOffset}`)
+  if (info.collapsed) lines.push('Курсор (пустое выделение)')
+  else if (info.text != null) lines.push(`Текст: ${JSON.stringify(info.text)}`)
+  return lines.join('\n')
+}

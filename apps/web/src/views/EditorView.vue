@@ -7,6 +7,7 @@ import AppLogo from '@/components/AppLogo.vue'
 import { uiConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useFileTabsStore } from '@/stores/fileTabs'
+import { formatSelectionContext } from '@/univer/selection'
 import { useUniverHost } from '@/univer/useUniver'
 
 const route = useRoute()
@@ -166,7 +167,7 @@ async function restoreCheckpoint() {
 }
 
 function selectionContext() {
-  return `Тип: ${docType.value}. Имя: ${docName.value}. Используй tools для чтения содержимого.`
+  return formatSelectionContext(univerApi.value, docType.value)
 }
 
 async function switchTab(id: string) {

@@ -140,25 +140,44 @@ const composerPlaceholder = computed(() => {
 })
 const emptyHints = computed(() => {
   const mode = active.value?.mode || 'agent'
+  const isDoc = props.docType === 'DOC'
   if (mode === 'plan') {
-    return [
-      'Составь план очистки и нормализации таблицы',
-      'Разбей задачу на шаги без правок файла',
-      'Какие риски у массовой замены значений?',
-    ]
+    return isDoc
+      ? [
+          'Составь план правки выделенного фрагмента',
+          'Разбей задачу на шаги без правок файла',
+          'Какие риски у глобальной замены текста?',
+        ]
+      : [
+          'Составь план очистки и нормализации таблицы',
+          'Разбей задачу на шаги без правок файла',
+          'Какие риски у массовой замены значений?',
+        ]
   }
   if (mode === 'chat') {
-    return [
-      'Объясни структуру текущего файла',
-      'Как лучше оформить заголовки?',
-      'Что означают эти формулы?',
-    ]
+    return isDoc
+      ? [
+          'Объясни структуру текущего документа',
+          'Что сейчас выделено?',
+          'Кратко перескажи начало текста',
+        ]
+      : [
+          'Объясни структуру текущего файла',
+          'Что в текущем выделении?',
+          'Найди пустые ячейки на активном листе',
+        ]
   }
-  return [
-    'Найди пустые ячейки и предложи правки',
-    'Отформатируй заголовки и ширину столбцов',
-    'Заполни пропуски по соседним значениям',
-  ]
+  return isDoc
+    ? [
+        'Замени выделенный текст на более короткий',
+        'Вставь абзац в место курсора',
+        'Найди повторы и предложи замену',
+      ]
+    : [
+        'Найди пустые ячейки и предложи правки',
+        'Очисти выделенный диапазон',
+        'Заполни пропуски по соседним значениям',
+      ]
 })
 const approveSummary = computed(() => {
   const pending = active.value?.pendingApprove
@@ -817,7 +836,7 @@ async function send(preset?: { display: string; wire: string }) {
     return
   }
   const contextParts: string[] = []
-  if (!preset && tab.includeDoc && props.docName) {
+  if (tab.includeDoc && props.docName) {
     contextParts.push(`Текущий документ: ${props.docName} (${props.docType})`)
     const sel = props.getSelectionContext?.()
     if (sel) contextParts.push(sel)
@@ -827,10 +846,14 @@ async function send(preset?: { display: string; wire: string }) {
       contextParts.push(`Файл ${file.name}:\n${file.text}`)
     }
   }
+  const contextBlock = contextParts.length
+    ? `\n\n---\nКонтекст:\n${contextParts.join('\n\n')}`
+    : ''
   const wire = preset?.wire
-    ?? (contextParts.length
-      ? `${display}\n\n---\nКонтекст:\n${contextParts.join('\n\n')}`
-      : display)
+    ? `${preset.wire}${tab.includeDoc && contextParts.length ? contextBlock : ''}`
+    : contextParts.length
+      ? `${display}${contextBlock}`
+      : display
 
   tab.messages.push({ key: crypto.randomUUID(), role: 'user', content: display, wire })
   if (tab.title === 'Новый чат') {
@@ -884,6 +907,7 @@ async function agentLoop(tabId: string) {
   let steps = 0
   let lastToolSig = ''
   let repeats = 0
+  let consecutiveToolErrors = 0
 
   while (steps < 25) {
     if (tab.abort?.signal.aborted) return
@@ -1092,6 +1116,27 @@ async function agentLoop(tabId: string) {
         toolCallId: call.id,
         toolStatus: status,
       })
+      if (status === 'error') {
+        consecutiveToolErrors += 1
+        if (consecutiveToolErrors >= 3) {
+          const content =
+            'Остановка: несколько tool-вызовов подряд завершились ошибкой. Уточните задачу или проверьте выделение.'
+          tab.messages.push({
+            key: crypto.randomUUID(),
+            role: 'assistant',
+            content,
+          })
+          pushSessionLog(tab, {
+            kind: 'system',
+            name: 'tool-errors',
+            content,
+            status: 'error',
+          })
+          return
+        }
+      } else {
+        consecutiveToolErrors = 0
+      }
     }
   }
 }

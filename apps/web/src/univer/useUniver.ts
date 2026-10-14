@@ -4,6 +4,11 @@ import { setSelectionInjector } from './selection'
 export type DocTextRange = {
   setText: (text: string) => boolean
   getText?: () => string
+  setTextStyle?: (style: {
+    bl?: number
+    it?: number
+    fs?: number
+  }) => boolean
 }
 
 export type DocParagraph = {

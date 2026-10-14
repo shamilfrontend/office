@@ -236,8 +236,7 @@ watch(
   <div class="editor-page">
     <header class="top">
       <button type="button" class="brand-btn" @click="router.push('/home')">
-        <AppLogo :size="24" :with-label="false" />
-        <span>Файлы</span>
+        <AppLogo :size="28" />
       </button>
       <input v-model="docName" class="title" @change="onTitleChange" />
       <span class="status">
@@ -351,13 +350,16 @@ watch(
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  height: var(--app-header-height);
+  box-sizing: border-box;
+  padding: 0 var(--app-header-padding-x);
   border-bottom: 1px solid var(--border);
   background: var(--bg-1);
 }
 .title {
   flex: 1;
   min-width: 120px;
+  height: var(--app-header-control-height);
   background: transparent;
   border: 0;
   color: var(--fg-0);
@@ -371,17 +373,42 @@ watch(
 .brand-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: var(--fg-1);
+  flex-shrink: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  line-height: 0;
+  color: inherit;
+  font: inherit;
   text-decoration: none;
   background: none;
-  border: 0;
   cursor: pointer;
-  padding: 4px 6px;
   border-radius: 8px;
 }
 .brand-btn:hover {
   background: var(--bg-hover);
+}
+.top > button:not(.brand-btn):not(.link) {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border-radius: 8px;
+  padding: 0 10px;
+  height: var(--app-header-control-height);
+  cursor: pointer;
+}
+.top > button.link {
+  color: var(--fg-2);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  height: auto;
+  border-radius: 0;
+  font: inherit;
+  cursor: pointer;
 }
 button {
   border: 1px solid var(--border);
@@ -399,6 +426,12 @@ button.link {
   padding: 0;
   border-radius: 0;
   font: inherit;
+}
+@media (max-width: 720px) {
+  .top {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }
 
 .file-tabs-row {

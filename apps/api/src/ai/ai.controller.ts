@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
@@ -14,12 +15,12 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { User } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiService } from './ai.service';
 import { ProviderKind } from './ai.providers';
-import OpenAI from 'openai';
+import { sanitizeChatRequest } from './chat-request';
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
@@ -154,30 +155,41 @@ export class AiController {
   @Post('chat')
   async chat(
     @CurrentUser() user: User,
-    @Body()
-    body: {
-      providerId?: string;
-      model?: string;
-      mode: 'chat' | 'plan' | 'agent';
-      messages: Array<{
-        role: 'system' | 'user' | 'assistant' | 'tool';
-        content: string;
-        tool_call_id?: string;
-        name?: string;
-      }>;
-      tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
-      tool_choice?: 'auto' | 'none' | 'required';
-    },
+    @Body() body: unknown,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
+    const sanitized = sanitizeChatRequest(body);
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    await this.ai.chatStream(user.id, body, (event) => {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-    });
-    res.end();
+    const abort = new AbortController();
+    const onClose = () => {
+      if (!abort.signal.aborted) abort.abort();
+    };
+    req.on('close', onClose);
+    req.on('aborted', onClose);
+
+    const writeEvent = (event: Record<string, unknown>) => {
+      if (res.writableEnded || res.destroyed) return;
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        if (!abort.signal.aborted) abort.abort();
+      }
+    };
+
+    try {
+      await this.ai.chatStream(user.id, sanitized, writeEvent, abort.signal);
+    } finally {
+      req.off('close', onClose);
+      req.off('aborted', onClose);
+      if (!res.writableEnded && !res.destroyed) {
+        res.end();
+      }
+    }
   }
 }

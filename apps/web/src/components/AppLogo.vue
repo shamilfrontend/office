@@ -30,7 +30,10 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   gap: calc(var(--logo-size) * 0.3);
+  height: var(--logo-size);
   line-height: 1;
+  font-family: var(--font-display);
+  color: var(--fg-0);
 }
 
 .app-logo__mark {
@@ -42,7 +45,9 @@ withDefaults(
 }
 
 .app-logo__label {
+  font-size: calc(var(--logo-size) * 0.64);
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1;
 }
 </style>

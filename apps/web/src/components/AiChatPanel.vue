@@ -114,8 +114,15 @@ const renameDraft = ref('')
 const expandedTools = ref<Set<string>>(new Set())
 const approveExpanded = ref(false)
 const copiedKey = ref('')
+const streamHtmlKey = ref('')
+const streamHtml = ref('')
 let logCopiedTimer: ReturnType<typeof setTimeout> | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+let streamHtmlTimer: ReturnType<typeof setTimeout> | null = null
+let lastTokenRateAt = 0
+
+const STREAM_HTML_MS = 80
+const TOKEN_RATE_MS = 200
 
 const hasProvider = computed(() => Boolean(auth.me?.hasAiProvider))
 const providers = computed(() => auth.me?.providers?.filter((p) => p.enabled) ?? [])
@@ -169,14 +176,14 @@ const emptyHints = computed(() => {
   }
   return isDoc
     ? [
-        'Замени выделенный текст на более короткий',
+        'Сделай выделенный заголовок жирным',
         'Вставь абзац в место курсора',
-        'Найди повторы и предложи замену',
+        'Замени выделенный текст на более короткий',
       ]
     : [
-        'Найди пустые ячейки и предложи правки',
-        'Очисти выделенный диапазон',
-        'Заполни пропуски по соседним значениям',
+        'Сделай первую строку жирной и подгони ширину колонок',
+        'Объедини A1:C1 и добавь внешнюю рамку',
+        'Отформатируй заголовки: жирный, заливка, по центру',
       ]
 })
 const approveSummary = computed(() => {
@@ -222,6 +229,8 @@ function resetTabs() {
   expandedTools.value = new Set()
   approveExpanded.value = false
   copiedKey.value = ''
+  clearStreamHtml()
+  lastTokenRateAt = 0
   if (logCopiedTimer) {
     clearTimeout(logCopiedTimer)
     logCopiedTimer = null
@@ -762,9 +771,63 @@ function removeAttach(index: number) {
   active.value?.attachments.splice(index, 1)
 }
 
+function clearStreamHtml() {
+  if (streamHtmlTimer) {
+    clearTimeout(streamHtmlTimer)
+    streamHtmlTimer = null
+  }
+  streamHtmlKey.value = ''
+  streamHtml.value = ''
+}
+
+function flushStreamHtml(key: string, content: string) {
+  streamHtmlKey.value = key
+  streamHtml.value = renderMd(content)
+}
+
+function scheduleStreamHtml(key: string, content: string) {
+  if (!streamHtmlTimer) {
+    streamHtmlTimer = setTimeout(() => {
+      streamHtmlTimer = null
+      flushStreamHtml(key, content)
+    }, STREAM_HTML_MS)
+    return
+  }
+  // Keep latest content for the pending flush
+  const pendingKey = key
+  const pendingContent = content
+  clearTimeout(streamHtmlTimer)
+  streamHtmlTimer = setTimeout(() => {
+    streamHtmlTimer = null
+    flushStreamHtml(pendingKey, pendingContent)
+  }, STREAM_HTML_MS)
+}
+
+function assistantHtml(message: Extract<UiMsg, { role: 'assistant' }>) {
+  if (message.key === streamHtmlKey.value && streamHtml.value) {
+    return streamHtml.value
+  }
+  return renderMd(message.content)
+}
+
 function askApprove(tab: Tab, name: string, args: Record<string, unknown>) {
   return new Promise<boolean>((resolve) => {
-    tab.pendingApprove = { name, args, resolve }
+    if (tab.abort?.signal.aborted) {
+      resolve(false)
+      return
+    }
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      tab.abort?.signal.removeEventListener('abort', onAbort)
+      if (tab.pendingApprove) tab.pendingApprove = null
+      approveExpanded.value = false
+      resolve(ok)
+    }
+    const onAbort = () => finish(false)
+    tab.abort?.signal.addEventListener('abort', onAbort, { once: true })
+    tab.pendingApprove = { name, args, resolve: finish }
   })
 }
 
@@ -867,6 +930,10 @@ async function send(preset?: { display: string; wire: string }) {
   tab.tokenRate = null
   tab.tokenMeta = null
   tab.showCheckpoint = false
+  clearStreamHtml()
+  lastTokenRateAt = 0
+  const controller = new AbortController()
+  tab.abort = controller
   if (props.univerApi) emit('checkpoint')
   void api.addChatMessage(tab.id, { role: 'user', content: wire })
 
@@ -894,23 +961,32 @@ async function send(preset?: { display: string; wire: string }) {
   } finally {
     tab.streaming = false
     tab.abort = null
+    clearStreamHtml()
   }
 }
 
 function stop() {
-  active.value?.abort?.abort()
+  const tab = active.value
+  if (!tab) return
+  tab.abort?.abort()
+  if (tab.pendingApprove) {
+    tab.pendingApprove.resolve(false)
+    tab.pendingApprove = null
+    approveExpanded.value = false
+  }
 }
 
 async function agentLoop(tabId: string) {
   const tab = findTab(tabId)
   if (!tab) return
+  const signal = tab.abort?.signal
   let steps = 0
   let lastToolSig = ''
   let repeats = 0
   let consecutiveToolErrors = 0
 
   while (steps < 25) {
-    if (tab.abort?.signal.aborted) return
+    if (signal?.aborted) return
     steps++
     const hasDocument = Boolean(props.documentId || props.docName)
     const docType = props.docType === 'DOC' ? 'DOC' : 'SHEET'
@@ -925,57 +1001,90 @@ async function agentLoop(tabId: string) {
       pushSessionLog(tab, { kind: 'system', name: 'editor', content, status: 'error' })
       return
     }
-    const controller = new AbortController()
-    tab.abort = controller
     const started = performance.now()
     let chars = 0
     const assistant: { content: string; toolCalls: ToolCall[] } = { content: '', toolCalls: [] }
     let assistantKey = ''
-    const promptTokens = JSON.stringify(toWire(tab)).length / 4
+    let usagePrompt: number | null = null
+    let usageCompletion: number | null = null
+    const messages = trimWireForProvider(toWire(tab))
+    const heuristicPrompt = JSON.stringify(messages).length / 4
 
     try {
-    await streamChat(
-      {
-        mode: tab.mode,
-        messages: toWire(tab),
-        tools,
-        tool_choice: tools.length ? 'auto' : 'none',
-        providerId: tab.providerId || providers.value[0]?.id,
-        model: tab.model || undefined,
-      },
-      (ev) => {
-        if (ev.type === 'delta' && typeof ev.content === 'string') {
-          assistant.content += ev.content
-          chars += ev.content.length
-          const seconds = Math.max(0.2, (performance.now() - started) / 1000)
-          tab.tokenRate = Math.round(chars / 4 / seconds)
-          if (!assistantKey) {
-            assistantKey = crypto.randomUUID()
-            tab.messages.push({ key: assistantKey, role: 'assistant', content: assistant.content })
-          } else {
-            const row = tab.messages.find((item) => item.key === assistantKey && item.role === 'assistant')
-            if (row && row.role === 'assistant') row.content = assistant.content
+      await streamChat(
+        {
+          mode: tab.mode,
+          messages,
+          docType,
+          hasDocument,
+          buildingPlan: tab.executingPlan,
+          providerId: tab.providerId || providers.value[0]?.id,
+          model: tab.model || undefined,
+        },
+        (ev) => {
+          if (ev.type === 'delta' && typeof ev.content === 'string') {
+            assistant.content += ev.content
+            chars += ev.content.length
+            const now = performance.now()
+            if (now - lastTokenRateAt >= TOKEN_RATE_MS) {
+              lastTokenRateAt = now
+              const seconds = Math.max(0.2, (now - started) / 1000)
+              tab.tokenRate = Math.round(chars / 4 / seconds)
+            }
+            if (!assistantKey) {
+              assistantKey = crypto.randomUUID()
+              tab.messages.push({
+                key: assistantKey,
+                role: 'assistant',
+                content: assistant.content,
+              })
+              flushStreamHtml(assistantKey, assistant.content)
+            } else {
+              const row = tab.messages.find(
+                (item) => item.key === assistantKey && item.role === 'assistant',
+              )
+              if (row && row.role === 'assistant') row.content = assistant.content
+              scheduleStreamHtml(assistantKey, assistant.content)
+            }
           }
-        }
-        if (ev.type === 'done') {
-          assistant.toolCalls = (ev.toolCalls as ToolCall[]) || []
-          if (assistant.toolCalls.length && !assistantKey) {
-            assistantKey = crypto.randomUUID()
-            tab.messages.push({
-              key: assistantKey,
-              role: 'assistant',
-              content: assistant.content,
-              toolCalls: assistant.toolCalls,
-            })
+          if (ev.type === 'usage') {
+            usagePrompt =
+              typeof ev.promptTokens === 'number' ? ev.promptTokens : usagePrompt
+            usageCompletion =
+              typeof ev.completionTokens === 'number'
+                ? ev.completionTokens
+                : usageCompletion
+            if (
+              typeof ev.completionTokens === 'number' &&
+              Number.isFinite(ev.completionTokens)
+            ) {
+              const seconds = Math.max(0.2, (performance.now() - started) / 1000)
+              tab.tokenRate = Math.round(ev.completionTokens / seconds)
+            }
           }
-        }
-        if (ev.type === 'error') throw new Error(String(ev.error || 'AI error'))
-      },
-      controller.signal,
-    )
+          if (ev.type === 'done') {
+            assistant.toolCalls = (ev.toolCalls as ToolCall[]) || []
+            if (assistant.toolCalls.length && !assistantKey) {
+              assistantKey = crypto.randomUUID()
+              tab.messages.push({
+                key: assistantKey,
+                role: 'assistant',
+                content: assistant.content,
+                toolCalls: assistant.toolCalls,
+              })
+            }
+            if (assistantKey) flushStreamHtml(assistantKey, assistant.content)
+          }
+          if (ev.type === 'error') throw new Error(String(ev.error || 'AI error'))
+        },
+        signal ?? new AbortController().signal,
+      )
     } catch (error) {
-      const aborted = error instanceof DOMException && error.name === 'AbortError'
-      if (aborted || controller.signal.aborted) {
+      const aborted =
+        (error instanceof DOMException && error.name === 'AbortError') ||
+        Boolean(signal?.aborted)
+      if (aborted) {
+        if (assistantKey) flushStreamHtml(assistantKey, assistant.content)
         await persistAssistant(tab, assistant)
         pushSessionLog(tab, {
           kind: 'system',
@@ -988,9 +1097,14 @@ async function agentLoop(tabId: string) {
       throw error
     }
 
-    const completionTokens = assistant.content.length / 4
+    if (signal?.aborted) return
+
+    const promptTokens = usagePrompt ?? heuristicPrompt
+    const completionTokens = usageCompletion ?? assistant.content.length / 4
     const rate = tab.tokenRate ?? 0
-    tab.tokenMeta = `${compact(promptTokens)} → ${compact(completionTokens)} · всего ${compact(promptTokens + completionTokens)} · ${rate} Токенов / сек`
+    const usageTag =
+      usagePrompt != null || usageCompletion != null ? '' : ' ≈'
+    tab.tokenMeta = `${compact(promptTokens)} → ${compact(completionTokens)} · всего ${compact(promptTokens + completionTokens)}${usageTag} · ${rate} ток/с`
 
     if (assistant.toolCalls.length) {
       if (!assistantKey) {
@@ -1041,6 +1155,7 @@ async function agentLoop(tabId: string) {
     }
 
     for (const call of assistant.toolCalls) {
+      if (signal?.aborted) return
       let args: Record<string, unknown> = {}
       try {
         args = JSON.parse(call.arguments || '{}') as Record<string, unknown>
@@ -1059,6 +1174,7 @@ async function agentLoop(tabId: string) {
       })
       if (isMassWrite(call.name, args)) {
         const ok = await askApprove(tab, call.name, args)
+        if (signal?.aborted) return
         if (!ok) {
           const rejected = 'Отклонено пользователем'
           setToolRow(tab, toolKey, rejected, rejected, 'error')
@@ -1078,6 +1194,7 @@ async function agentLoop(tabId: string) {
           continue
         }
       }
+      if (signal?.aborted) return
       let result: string
       try {
         result = await runOfficeTool(call.name, args, {
@@ -1159,6 +1276,72 @@ async function persistAssistant(tab: Tab, assistant: { content: string; toolCall
   })
 }
 
+const TOOL_WIRE_MAX = 4000
+const ARGS_WIRE_MAX = 2000
+const MSG_WIRE_MAX = 32_000
+const WIRE_MAX_MESSAGES = 60
+const WIRE_MAX_TOTAL_CHARS = 140_000
+
+function clipWireText(text: string, max: number): string {
+  if (text.length <= max) return text
+  return JSON.stringify({
+    truncated: true,
+    preview: text.slice(0, max),
+    originalChars: text.length,
+  })
+}
+
+function wireContentChars(msg: Record<string, unknown>): number {
+  let n = 0
+  if (typeof msg.content === 'string') n += msg.content.length
+  const toolCalls = msg.tool_calls
+  if (Array.isArray(toolCalls)) {
+    for (const tc of toolCalls) {
+      const args = (tc as { function?: { arguments?: string } })?.function?.arguments
+      if (typeof args === 'string') n += args.length
+    }
+  }
+  return n
+}
+
+function trimWireForProvider(wire: Array<Record<string, unknown>>) {
+  const totalChars = () => wire.reduce((sum, m) => sum + wireContentChars(m), 0)
+  if (wire.length <= WIRE_MAX_MESSAGES && totalChars() <= WIRE_MAX_TOTAL_CHARS) {
+    return wire
+  }
+
+  const turns: Array<Array<Record<string, unknown>>> = []
+  let current: Array<Record<string, unknown>> = []
+  for (const msg of wire) {
+    if (msg.role === 'user' && current.length) {
+      turns.push(current)
+      current = []
+    }
+    current.push(msg)
+  }
+  if (current.length) turns.push(current)
+
+  let dropped = 0
+  while (
+    turns.length > 1 &&
+    (turns.reduce((n, t) => n + t.length, 0) > WIRE_MAX_MESSAGES ||
+      turns.reduce((n, t) => n + t.reduce((s, m) => s + wireContentChars(m), 0), 0) >
+        WIRE_MAX_TOTAL_CHARS)
+  ) {
+    dropped += turns.shift()!.length
+  }
+
+  const kept = turns.flat()
+  if (!dropped) return kept
+  return [
+    {
+      role: 'user',
+      content: `[Пропущены ранние сообщения: ${dropped}]`,
+    },
+    ...kept,
+  ]
+}
+
 function closeOpenToolCalls(
   wire: Array<Record<string, unknown>>,
   openToolCallIds: Set<string> | null,
@@ -1181,7 +1364,10 @@ function toWire(tab: Tab) {
     if (message.role === 'user') {
       closeOpenToolCalls(wire, openToolCallIds)
       openToolCallIds = null
-      wire.push({ role: 'user', content: message.wire })
+      wire.push({
+        role: 'user',
+        content: clipWireText(message.wire, MSG_WIRE_MAX),
+      })
     }
     if (message.role === 'assistant') {
       closeOpenToolCalls(wire, openToolCallIds)
@@ -1189,15 +1375,21 @@ function toWire(tab: Tab) {
         ? message.toolCalls.map((call) => ({
             id: call.id,
             type: 'function' as const,
-            function: { name: call.name, arguments: call.arguments },
+            function: {
+              name: call.name,
+              arguments: clipWireText(call.arguments, ARGS_WIRE_MAX),
+            },
           }))
         : undefined
       openToolCallIds = toolCalls
         ? new Set(toolCalls.map((call) => call.id))
         : null
+      const content = message.content
+        ? clipWireText(message.content, MSG_WIRE_MAX)
+        : null
       wire.push({
         role: 'assistant',
-        content: message.content || null,
+        content,
         ...(toolCalls ? { tool_calls: toolCalls } : {}),
       })
     }
@@ -1208,12 +1400,22 @@ function toWire(tab: Tab) {
         role: 'tool',
         tool_call_id: message.toolCallId,
         name: message.name,
-        content: message.full || message.content,
+        content: clipWireText(message.full || message.content, TOOL_WIRE_MAX),
       })
     }
   }
   closeOpenToolCalls(wire, openToolCallIds)
   return wire
+}
+
+function parseSsePart(part: string): Record<string, unknown> | null {
+  const line = part.trim()
+  if (!line.startsWith('data:')) return null
+  try {
+    return JSON.parse(line.slice(5).trim()) as Record<string, unknown>
+  } catch {
+    return null
+  }
 }
 
 async function streamChat(
@@ -1232,16 +1434,28 @@ async function streamChat(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      const line = part.trim()
-      if (!line.startsWith('data:')) continue
-      onEvent(JSON.parse(line.slice(5).trim()) as Record<string, unknown>)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() || ''
+      for (const part of parts) {
+        const event = parseSsePart(part)
+        if (event) onEvent(event)
+      }
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) {
+      const event = parseSsePart(buffer)
+      if (event) onEvent(event)
+    }
+  } finally {
+    try {
+      await reader.cancel()
+    } catch {
+      /* ignore */
     }
   }
 }
@@ -1386,7 +1600,7 @@ function onComposerKey(event: KeyboardEvent) {
         >
           <div v-for="message in active.messages" :key="message.key" class="msg" :class="message.role">
             <div v-if="message.role === 'assistant' && message.content" class="assistant-wrap">
-              <div class="bubble md" v-html="renderMd(message.content)" />
+              <div class="bubble md" v-html="assistantHtml(message)" />
               <button
                 type="button"
                 class="msg-copy"

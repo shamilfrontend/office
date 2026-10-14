@@ -20,35 +20,76 @@ export type DocSelectionInfo = {
 
 export type SelectionInfo = SheetSelectionInfo | DocSelectionInfo | { kind: 'none'; reason: string }
 
-type SheetRange = {
+export type SheetRange = {
   getA1Notation: (withSheet?: boolean) => string
   getValues: () => unknown[][]
+  getFormulas: () => string[][]
   getDisplayValues?: () => string[][]
   getRange?: () => { startRow: number; startColumn: number; endRow: number; endColumn: number }
+  setValues: (v: unknown[][]) => void
+  setFormulas: (f: string[][]) => void
+  clear: () => void
+  setFontWeight?: (weight: 'bold' | 'normal' | null) => unknown
+  setFontSize?: (size: number | null) => unknown
+  setFontColor?: (color: string | null) => unknown
+  setBackgroundColor?: (color: string) => unknown
+  setHorizontalAlignment?: (align: 'left' | 'center' | 'normal') => unknown
+  setWrap?: (wrap: boolean) => unknown
+  setNumberFormat?: (pattern: string) => unknown
+  setBorder?: (type: string, style: number, color?: string) => unknown
+  merge?: (options?: { isForceMerge?: boolean }) => unknown
+  mergeAcross?: (options?: { isForceMerge?: boolean }) => unknown
+  mergeVertically?: (options?: { isForceMerge?: boolean }) => unknown
+  breakApart?: () => unknown
 }
 
-type SheetApi = {
+export type SheetApi = {
   getActiveSheet: () => {
     getSheetName: () => string
     getActiveRange: () => SheetRange | null
     getActiveCell: () => SheetRange | null
     getRange: {
-      (a1: string): SheetRange & {
-        setValues: (v: unknown[][]) => void
-        clear: () => void
-      }
-      (row: number, column: number, numRows: number, numColumns: number): SheetRange & {
-        setValues: (v: unknown[][]) => void
-        clear: () => void
-      }
+      (a1: string): SheetRange
+      (row: number, column: number, numRows: number, numColumns: number): SheetRange
     }
     getMaxRows: () => number
     getMaxColumns: () => number
     getDataRange: () => SheetRange
+    setColumnWidth?: (columnPosition: number, width: number) => unknown
+    setColumnWidths?: (startColumn: number, numColumn: number, width: number) => unknown
+    setRowHeight?: (rowPosition: number, height: number) => unknown
+    setRowHeights?: (startRow: number, numRows: number, height: number) => unknown
   }
   getActiveRange?: () => SheetRange | null
   getActiveCell?: () => SheetRange | null
   getSheets: () => Array<{ getSheetName: () => string }>
+}
+
+/** Estimate cell count of an A1 range (e.g. A1:C10 → 30). */
+export function estimateA1Area(a1: string): number {
+  const clean = String(a1 || '')
+    .trim()
+    .replace(/^[^!]*!/, '')
+  if (!clean) return 0
+  const parts = clean.split(':')
+  const start = parseA1Cell(parts[0])
+  if (!start) return 0
+  const end = parts[1] ? parseA1Cell(parts[1]) : start
+  if (!end) return 0
+  return (Math.abs(end.row - start.row) + 1) * (Math.abs(end.col - start.col) + 1)
+}
+
+export function resolveColumnIndex(column: string | number): number | null {
+  if (typeof column === 'number' && Number.isFinite(column)) {
+    return column >= 0 ? Math.floor(column) : null
+  }
+  const text = String(column || '').trim()
+  if (/^\d+$/.test(text)) {
+    const n = Number(text)
+    return n >= 0 ? n : null
+  }
+  const idx = colLettersToIndex(text)
+  return idx >= 0 ? idx : null
 }
 
 type InjectorLike = {

@@ -386,19 +386,23 @@ async function logout() {
   grid-template-columns: 1fr minmax(220px, 560px) 1fr;
   align-items: center;
   gap: 16px;
-  padding: 10px 32px;
+  height: var(--app-header-height);
+  box-sizing: border-box;
+  padding: 0 var(--app-header-padding-x);
   border-bottom: 1px solid var(--border);
   background: var(--bg-1);
 }
 .brand {
-  font-family: var(--font-display);
-  font-weight: 700;
-  color: var(--fg-0);
+  display: inline-flex;
+  align-items: center;
   justify-self: start;
+  height: 28px;
+  line-height: 0;
 }
 .search {
   width: 100%;
-  padding: 9px 16px;
+  height: var(--app-header-control-height);
+  padding: 0 16px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: var(--bg-2);
@@ -711,7 +715,10 @@ async function logout() {
 }
 
 @media (max-width: 720px) {
-  .bar,
+  .bar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
   .content {
     padding-left: 16px;
     padding-right: 16px;

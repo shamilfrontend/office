@@ -420,12 +420,14 @@ export class AiService {
       providerId?: string;
       model?: string;
       mode: 'chat' | 'plan' | 'agent';
-      messages: Array<Record<string, unknown>>;
-      tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
-      tool_choice?: 'auto' | 'none' | 'required';
+      messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+      tools: OpenAI.Chat.Completions.ChatCompletionTool[];
+      tool_choice: 'auto' | 'none' | 'required';
     },
     onEvent: (event: Record<string, unknown>) => void,
+    signal?: AbortSignal,
   ) {
+    if (signal?.aborted) return;
     let cfg;
     try {
       cfg = await this.resolveProvider(userId, body.providerId);
@@ -462,27 +464,30 @@ export class AiService {
     }
     const systemExtra =
       body.mode === 'plan'
-        ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим План: только читай документ через tools и создавай план (create_plan/update_plan). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection или контекст выделения. Для таблиц сначала read_range/get_selection.'
+        ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим План: только читай документ через tools и создавай план (create_plan/update_plan). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection или контекст выделения. Для таблиц сначала read_range/read_formulas/get_selection.'
         : body.mode === 'agent'
-          ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Агент: можешь читать и изменять документ через tools. Если пользователь говорит «здесь/это/выделенное», опирайся на selection / get_selection. Для таблиц: set_cells пишет весь 2D-блок от start (или от активной ячейки); сначала read_range/get_selection. После серии tools дай краткий итог.'
-          : 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Чат: читай открытый документ через tools (сначала get_workbook_outline/get_doc_outline или get_selection, затем read_range / read_document). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection. Если tools доступны, не говори, что нет доступа к файлу — сначала прочитай его. Предлагай правки текстом.';
+          ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Агент: можешь читать и изменять документ через tools. Если пользователь говорит «здесь/это/выделенное», опирайся на selection / get_selection. Для таблиц: set_cells — литералы; set_formulas — формулы (EN-имена, аргументы через запятую, ведущий =, напр. =SUM(A1:A10)); read_formulas читает формулы и значения; для оформления — format_range, set_column_widths, set_number_format, set_borders, set_row_heights; для объединения — merge_range; сначала read_range/read_formulas/get_selection. Для документов: format_text по выделению. После серии tools дай краткий итог.'
+          : 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Чат: читай открытый документ через tools (сначала get_workbook_outline/get_doc_outline или get_selection, затем read_range / read_formulas / read_document). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection. Если tools доступны, не говори, что нет доступа к файлу — сначала прочитай его. Предлагай правки текстом.';
 
     let attempt = 0;
     while (attempt < 3) {
+      if (signal?.aborted) return;
       attempt++;
       try {
-        const stream = await client.chat.completions.create({
-          model,
-          stream: true,
-          messages: [
-            { role: 'system', content: systemExtra },
-            ...(body.messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[]),
-          ],
-          tools: body.tools?.length ? body.tools : undefined,
-          tool_choice: body.tools?.length
-            ? (body.tool_choice ?? 'auto')
-            : undefined,
-        });
+        const stream = await client.chat.completions.create(
+          {
+            model,
+            stream: true,
+            stream_options: { include_usage: true },
+            messages: [
+              { role: 'system', content: systemExtra },
+              ...body.messages,
+            ],
+            tools: body.tools.length ? body.tools : undefined,
+            tool_choice: body.tools.length ? body.tool_choice : undefined,
+          },
+          { signal },
+        );
 
         let full = '';
         const toolCalls: Array<{
@@ -490,8 +495,30 @@ export class AiService {
           name: string;
           arguments: string;
         }> = [];
+        let usage: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+        } | null = null;
 
         for await (const chunk of stream) {
+          if (signal?.aborted) return;
+          const chunkUsage = (
+            chunk as {
+              usage?: {
+                prompt_tokens?: number;
+                completion_tokens?: number;
+                total_tokens?: number;
+              } | null;
+            }
+          ).usage;
+          if (chunkUsage) {
+            usage = {
+              promptTokens: chunkUsage.prompt_tokens ?? 0,
+              completionTokens: chunkUsage.completion_tokens ?? 0,
+              totalTokens: chunkUsage.total_tokens ?? 0,
+            };
+          }
           const delta = chunk.choices[0]?.delta;
           if (delta?.content) {
             full += delta.content;
@@ -516,6 +543,15 @@ export class AiService {
           }
         }
 
+        if (signal?.aborted) return;
+        if (usage) {
+          onEvent({
+            type: 'usage',
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          });
+        }
         onEvent({
           type: 'done',
           content: full,
@@ -523,9 +559,13 @@ export class AiService {
         });
         return;
       } catch (e) {
+        if (signal?.aborted) return;
+        const name = (e as { name?: string }).name;
+        if (name === 'AbortError' || name === 'APIUserAbortError') return;
         const status = (e as { status?: number }).status;
-        if ((status === 408 || status === 429) && attempt < 3) {
+        if ((status === 408 || status === 429) && attempt < 3 && !signal?.aborted) {
           await new Promise((r) => setTimeout(r, 500 * attempt));
+          if (signal?.aborted) return;
           continue;
         }
         onEvent({ type: 'error', error: this.formatError(e) });

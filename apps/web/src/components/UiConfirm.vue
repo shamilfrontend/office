@@ -39,11 +39,11 @@ onUnmounted(() => {
 <template>
   <div
     v-if="state.open"
-    class="overlay"
+    class="ui-overlay overlay"
     @click.self="confirmCancel()"
   >
     <div
-      class="dialog"
+      class="ui-modal dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ui-confirm-title"
@@ -54,14 +54,14 @@ onUnmounted(() => {
         {{ state.message }}
       </p>
       <div class="actions">
-        <button type="button" class="cancel" @click="confirmCancel()">
+        <button type="button" class="ui-btn" @click="confirmCancel()">
           {{ state.cancelLabel }}
         </button>
         <button
           ref="confirmBtn"
           type="button"
-          class="confirm"
-          :class="{ danger: state.danger }"
+          class="ui-btn"
+          :class="state.danger ? 'ui-btn--danger' : 'ui-btn--primary'"
           @click="confirmAccept()"
         >
           {{ state.confirmLabel }}
@@ -73,25 +73,18 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: grid;
-  place-items: center;
-  z-index: 60;
-  padding: 16px;
+  z-index: var(--z-confirm);
 }
 .dialog {
   width: min(400px, 100%);
   padding: 20px 20px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
 }
 h2 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--fg-0);
 }
 .message {
@@ -105,34 +98,5 @@ h2 {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
-}
-button {
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-3);
-  color: var(--fg-0);
-  cursor: pointer;
-}
-button:hover {
-  background: var(--bg-hover);
-}
-.confirm.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-.confirm.danger:hover {
-  filter: brightness(1.08);
-  background: var(--danger);
-}
-.confirm:not(.danger) {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.confirm:not(.danger):hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
 }
 </style>

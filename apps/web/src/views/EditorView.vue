@@ -248,20 +248,23 @@ watch(
               : 'Есть изменения'
         }}
       </span>
-      <button type="button" @click="save">Сохранить</button>
-      <button
-        v-if="docType === 'SHEET'"
-        type="button"
-        @click="download('xlsx')"
-      >
-        Скачать Excel
-      </button>
-      <button v-else type="button" @click="download('docx')">
-        Скачать Word
-      </button>
-      <button type="button" class="link" @click="auth.openSettings()">
-        Настройки
-      </button>
+      <div class="actions">
+        <button type="button" class="ui-btn" @click="save">Сохранить</button>
+        <button
+          v-if="docType === 'SHEET'"
+          type="button"
+          class="ui-btn"
+          @click="download('xlsx')"
+        >
+          Скачать Excel
+        </button>
+        <button v-else type="button" class="ui-btn" @click="download('docx')">
+          Скачать Word
+        </button>
+        <button type="button" class="ui-btn ui-btn--ghost settings-btn" @click="auth.openSettings()">
+          Настройки
+        </button>
+      </div>
     </header>
 
     <div class="file-tabs-row" @keydown.escape="closeNewMenu">
@@ -278,7 +281,30 @@ watch(
           @click="switchTab(tab.id)"
           @auxclick.middle.prevent="closeTab(tab.id, $event)"
         >
-          <span class="file-tab-type">{{ tab.type === 'SHEET' ? '⊞' : '¶' }}</span>
+          <span
+            class="file-tab-type"
+            :class="tab.type === 'SHEET' ? 'sheet' : 'doc'"
+            aria-hidden="true"
+          >
+            <svg v-if="tab.type === 'SHEET'" viewBox="0 0 24 24" width="14" height="14">
+              <rect x="3" y="4" width="18" height="16" rx="2" fill="currentColor" opacity="0.2" />
+              <path d="M3 9h18M9 4v16" stroke="currentColor" stroke-width="1.5" fill="none" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="14" height="14">
+              <path
+                d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"
+                fill="currentColor"
+                opacity="0.2"
+              />
+              <path
+                d="M14 3v4h4M8 12h8M8 16h5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                fill="none"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
           <span class="file-tab-name">{{ tab.name }}</span>
           <span
             class="file-tab-close"
@@ -300,7 +326,7 @@ watch(
           >
             +
           </button>
-          <div v-if="newMenuOpen" class="file-tabs-menu" role="menu">
+          <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
             <button type="button" role="menuitem" @click="createAndOpen('SHEET')">
               Новая таблица
             </button>
@@ -363,12 +389,27 @@ watch(
   background: transparent;
   border: 0;
   color: var(--fg-0);
+  font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.title:focus {
+  outline: none;
+}
+.title:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .status {
   color: var(--fg-3);
   font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .brand-btn {
   display: inline-flex;
@@ -385,52 +426,26 @@ watch(
   text-decoration: none;
   background: none;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 .brand-btn:hover {
   background: var(--bg-hover);
 }
-.top > button:not(.brand-btn):not(.link) {
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--fg-1);
-  border-radius: 8px;
-  padding: 0 10px;
-  height: var(--app-header-control-height);
-  cursor: pointer;
+.brand-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
-.top > button.link {
-  color: var(--fg-2);
-  text-decoration: none;
-  background: none;
-  border: 0;
-  padding: 0;
-  height: auto;
-  border-radius: 0;
-  font: inherit;
-  cursor: pointer;
-}
-button {
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--fg-1);
-  border-radius: 8px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-button.link {
-  color: var(--fg-2);
-  text-decoration: none;
-  background: none;
-  border: 0;
-  padding: 0;
-  border-radius: 0;
-  font: inherit;
-}
+
 @media (max-width: 720px) {
   .top {
     padding-left: 16px;
     padding-right: 16px;
+  }
+  .status {
+    display: none;
+  }
+  .settings-btn {
+    display: none;
   }
 }
 
@@ -466,7 +481,7 @@ button.link {
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-2);
   font-size: 1.15rem;
@@ -482,31 +497,10 @@ button.link {
   cursor: default;
 }
 .file-tabs-menu {
-  position: absolute;
   top: calc(100% + 4px);
   left: 0;
   min-width: 180px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-1);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   z-index: 3;
-}
-.file-tabs-menu button {
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-1);
-  text-align: left;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-.file-tabs-menu button:hover {
-  background: var(--bg-hover);
 }
 .file-tabs-backdrop {
   position: fixed;
@@ -524,7 +518,7 @@ button.link {
   gap: 6px;
   max-width: 200px;
   min-width: 96px;
-  padding: 6px 8px 6px 12px;
+  padding: 6px 8px 6px 10px;
   border: 0;
   border-right: 1px solid var(--border);
   border-radius: 0;
@@ -545,8 +539,19 @@ button.link {
 }
 .file-tab-type {
   flex: 0 0 auto;
-  opacity: 0.7;
-  font-size: 0.8rem;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+}
+.file-tab-type.sheet {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.file-tab-type.doc {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .file-tab-name {
   flex: 1;
@@ -562,7 +567,7 @@ button.link {
   height: 18px;
   line-height: 16px;
   text-align: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   opacity: 0;
   color: var(--fg-3);
   font-size: 1rem;
@@ -586,6 +591,6 @@ button.link {
   min-width: 0;
   min-height: 0;
   position: relative;
-  background: #fff;
+  background: var(--canvas);
 }
 </style>

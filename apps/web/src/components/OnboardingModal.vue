@@ -78,8 +78,8 @@ async function skip() {
 </script>
 
 <template>
-  <div class="overlay">
-    <div class="modal" role="dialog" aria-modal="true">
+  <div class="ui-overlay overlay">
+    <div class="ui-modal modal" role="dialog" aria-modal="true">
       <div class="modal-brand">
         <AppLogo :size="36" />
       </div>
@@ -114,13 +114,13 @@ async function skip() {
       <p v-if="status" class="status">{{ status }}</p>
 
       <div class="row">
-        <button type="button" class="ghost" :disabled="busy" @click="test">
+        <button type="button" class="ui-btn ui-btn--ghost" :disabled="busy" @click="test">
           Проверить
         </button>
-        <button type="button" class="ghost" :disabled="busy" @click="skip">
+        <button type="button" class="ui-btn ui-btn--ghost" :disabled="busy" @click="skip">
           Пропустить
         </button>
-        <button type="button" class="primary" :disabled="busy" @click="save">
+        <button type="button" class="ui-btn ui-btn--primary" :disabled="busy" @click="save">
           Подключить
         </button>
       </div>
@@ -130,29 +130,20 @@ async function skip() {
 
 <style scoped lang="scss">
 .overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: grid;
-  place-items: center;
-  z-index: 50;
-  padding: 16px;
+  z-index: var(--z-settings);
 }
 .modal {
   width: min(480px, 100%);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: var(--shadow);
 }
 .modal-brand {
   margin-bottom: 16px;
-  color: var(--fg-0);
-  font-family: var(--font-display);
 }
 h2 {
   margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
 }
 .hint {
   color: var(--fg-2);
@@ -169,10 +160,15 @@ input,
 select {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--bg-1);
+  background: var(--bg-2);
   color: var(--fg-0);
+}
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .row {
   display: flex;
@@ -180,22 +176,6 @@ select {
   justify-content: flex-end;
   margin-top: 16px;
   flex-wrap: wrap;
-}
-button {
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 10px 14px;
-  cursor: pointer;
-  background: var(--bg-3);
-  color: var(--fg-0);
-}
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-button.ghost:hover {
-  background: var(--bg-hover);
 }
 .status {
   color: var(--fg-2);

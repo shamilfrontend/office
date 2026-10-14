@@ -165,11 +165,11 @@ async function logout() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="close">
+  <div class="ui-overlay overlay" @click.self="close">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="head">
         <h2 id="settings-title">Настройки</h2>
-        <button type="button" class="close" aria-label="Закрыть" @click="close">×</button>
+        <button type="button" class="ui-btn close" aria-label="Закрыть" @click="close">×</button>
       </header>
 
       <div class="body">
@@ -183,7 +183,7 @@ async function logout() {
                 <div class="muted">{{ auth.me?.email }}</div>
               </div>
             </div>
-            <button type="button" @click="logout">Выйти</button>
+            <button type="button" class="ui-btn" @click="logout">Выйти</button>
           </div>
         </section>
 
@@ -197,13 +197,13 @@ async function logout() {
                 <div v-if="p.hasApiKey" class="muted">Ключ сохранён</div>
               </div>
               <div class="row">
-                <button type="button" @click="editProvider(p.id)">Изменить</button>
-                <button type="button" @click="remove(p.id)">Удалить</button>
+                <button type="button" class="ui-btn" @click="editProvider(p.id)">Изменить</button>
+                <button type="button" class="ui-btn" @click="remove(p.id)">Удалить</button>
               </div>
             </li>
           </ul>
           <div v-if="!showProviderForm" class="row">
-            <button type="button" class="primary" @click="openProviderForm">
+            <button type="button" class="ui-btn ui-btn--primary" @click="openProviderForm">
               Добавить провайдер
             </button>
           </div>
@@ -238,9 +238,9 @@ async function logout() {
               />
             </label>
             <div class="row">
-              <button type="button" @click="test">Проверить</button>
-              <button type="button" class="primary" @click="save">Сохранить</button>
-              <button type="button" @click="cancelProviderForm">Отмена</button>
+              <button type="button" class="ui-btn" @click="test">Проверить</button>
+              <button type="button" class="ui-btn ui-btn--primary" @click="save">Сохранить</button>
+              <button type="button" class="ui-btn ui-btn--ghost" @click="cancelProviderForm">Отмена</button>
             </div>
             <p v-if="status" class="muted">{{ status }}</p>
           </div>
@@ -273,24 +273,19 @@ async function logout() {
 
 <style scoped lang="scss">
 .overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: grid;
-  place-items: center;
-  z-index: 50;
-  padding: 16px;
+  z-index: var(--z-settings);
 }
 .modal {
   width: min(640px, 100%);
   max-height: min(90vh, 900px);
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
+  background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   overflow: hidden;
+  padding: 0;
 }
 .head {
   display: flex;
@@ -303,7 +298,11 @@ async function logout() {
 }
 .head h2 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
 }
 .close {
   width: 36px;
@@ -311,14 +310,6 @@ async function logout() {
   padding: 0;
   font-size: 1.4rem;
   line-height: 1;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-3);
-  color: var(--fg-0);
-  cursor: pointer;
-}
-.close:hover {
-  background: var(--bg-hover);
 }
 .body {
   padding: 16px 20px 24px;
@@ -328,15 +319,19 @@ section {
   margin-bottom: 20px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
 }
 section:last-child {
   margin-bottom: 0;
 }
 h3 {
   margin: 0 0 12px;
+  font-family: var(--font-display);
   font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
 }
 .profile {
   display: flex;
@@ -372,9 +367,10 @@ h3 {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
-.list .row button,
-.profile > button {
-  padding: 6px 10px;
+.list .row .ui-btn,
+.profile > .ui-btn {
+  height: 32px;
+  padding: 0 10px;
   font-size: 0.85rem;
 }
 .form {
@@ -388,21 +384,17 @@ label {
   font-size: 0.9rem;
 }
 input,
-select,
-button {
+select {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--bg-2);
+  background: var(--bg-1);
   color: var(--fg-0);
 }
-button {
-  cursor: pointer;
-}
-.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .row {
   display: flex;
@@ -421,9 +413,9 @@ button {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--bg-2);
+  background: var(--bg-1);
   color: var(--fg-2);
   cursor: pointer;
 }
@@ -435,5 +427,9 @@ button {
 .theme-switch button:hover:not(.active) {
   background: var(--bg-hover);
   color: var(--fg-0);
+}
+.theme-switch button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 </style>

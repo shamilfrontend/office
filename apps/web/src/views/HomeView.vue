@@ -218,7 +218,7 @@ async function logout() {
             <img v-if="auth.me?.avatarUrl" :src="auth.me.avatarUrl" alt="" />
             <span v-else>{{ auth.me?.displayName?.[0] || 'U' }}</span>
           </button>
-          <div v-if="profileMenuOpen" class="dropdown profile-menu" @click.stop>
+          <div v-if="profileMenuOpen" class="ui-dropdown profile-menu" @click.stop>
             <div class="profile-meta">
               <div class="profile-name">{{ auth.me?.displayName || 'Аккаунт' }}</div>
               <div v-if="auth.me?.email" class="profile-email">{{ auth.me.email }}</div>
@@ -304,7 +304,7 @@ async function logout() {
         <h2 class="section-title">Недавние</h2>
 
         <div v-if="!filtered.length" class="empty">
-          Пока нет файлов — создайте или откройте с компьютера.
+          Пока нет файлов. Создайте таблицу или документ выше — или откройте файл с компьютера.
         </div>
 
         <template v-else>
@@ -359,7 +359,7 @@ async function logout() {
                       <circle cx="12" cy="18" r="1.5" fill="currentColor" />
                     </svg>
                   </button>
-                  <div v-if="menuOpenId === doc.id" class="dropdown" @click.stop>
+                  <div v-if="menuOpenId === doc.id" class="ui-dropdown file-menu" @click.stop>
                     <button type="button" @click="download(doc)">Скачать</button>
                     <button type="button" @click="rename(doc)">Переименовать</button>
                     <button type="button" class="danger" @click="remove(doc)">Удалить</button>
@@ -379,7 +379,7 @@ async function logout() {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-1);
+  background: var(--bg-0);
 }
 .bar {
   display: grid;
@@ -403,16 +403,15 @@ async function logout() {
   width: 100%;
   height: var(--app-header-control-height);
   padding: 0 16px;
-  border-radius: 999px;
-  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
   background: var(--bg-2);
   color: var(--fg-0);
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .search:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: var(--focus-ring);
 }
 .right {
   display: flex;
@@ -442,17 +441,22 @@ async function logout() {
 .avatar[aria-expanded='true'] {
   border-color: var(--accent);
 }
+.avatar:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 .profile-menu {
+  right: 0;
   top: calc(100% + 8px);
   min-width: 200px;
 }
 .profile-meta {
-  padding: 8px 12px 10px;
+  padding: 8px 10px 10px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
@@ -477,18 +481,22 @@ async function logout() {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 24px 32px 64px;
+  padding: 28px 32px 64px;
+  background: var(--bg-1);
+  border-top: 0;
 }
 .create-block {
-  margin-bottom: 28px;
+  margin-bottom: 32px;
 }
 .recent-block {
   width: 100%;
 }
 .section-title {
-  margin: 0 0 12px;
-  font-size: 0.875rem;
-  color: var(--fg-2);
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
   font-weight: 600;
 }
 .tiles {
@@ -504,42 +512,43 @@ async function logout() {
   min-height: 64px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-0);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
   color: var(--fg-0);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
-}
-[data-theme='light'] .tile {
-  background: #fff;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 .tile:hover:not(:disabled) {
   background: var(--bg-hover);
-  border-color: color-mix(in srgb, var(--fg-3) 45%, var(--border));
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-color: var(--fg-3);
+}
+.tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .tile:disabled {
   cursor: not-allowed;
+  opacity: 0.65;
 }
 .tile-icon {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
 }
 .tile-icon.sheet {
-  background: rgba(34, 197, 94, 0.12);
-  color: #16a34a;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
 }
 .tile-icon.doc {
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 .tile-icon.upload {
-  background: var(--bg-2);
+  background: var(--bg-3);
   color: var(--fg-2);
 }
 .tile-spinner {
@@ -569,8 +578,10 @@ async function logout() {
 }
 .empty {
   color: var(--fg-3);
-  padding: 20px 0;
-  font-size: 0.9rem;
+  padding: 8px 0 4px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  max-width: 40ch;
 }
 .list-head {
   display: grid;
@@ -603,7 +614,7 @@ async function logout() {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   position: relative;
   min-height: 42px;
 }
@@ -628,17 +639,17 @@ async function logout() {
 .type-icon {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
 }
 .type-icon.sheet {
-  background: rgba(34, 197, 94, 0.12);
-  color: #16a34a;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
 }
 .type-icon.doc {
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 .file-name {
   font-weight: 500;
@@ -665,7 +676,7 @@ async function logout() {
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-2);
   cursor: pointer;
@@ -683,48 +694,21 @@ async function logout() {
   background: var(--bg-2);
   color: var(--fg-0);
 }
-.dropdown {
-  position: absolute;
+.file-menu {
   right: 0;
   top: calc(100% - 2px);
-  z-index: 10;
   min-width: 168px;
-  padding: 6px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-1);
-  box-shadow: var(--shadow);
-  display: grid;
-}
-.dropdown button {
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: var(--fg-1);
-  padding: 8px 12px;
-  border-radius: 7px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.875rem;
-}
-.dropdown button:hover {
-  background: var(--bg-hover);
-}
-.dropdown .danger {
-  color: var(--danger);
 }
 
 @media (max-width: 720px) {
   .bar {
     padding-left: 16px;
     padding-right: 16px;
+    grid-template-columns: auto 1fr auto;
   }
   .content {
     padding-left: 16px;
     padding-right: 16px;
-  }
-  .bar {
-    grid-template-columns: auto 1fr auto;
   }
   .list-head,
   .file-main {

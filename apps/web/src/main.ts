@@ -4,6 +4,7 @@ import App from './App.vue'
 import router from './router'
 import { initTheme } from './composables/useTheme'
 import './styles/tokens.scss'
+import './styles/ui.scss'
 
 initTheme()
 createApp(App).use(createPinia()).use(router).mount('#app')

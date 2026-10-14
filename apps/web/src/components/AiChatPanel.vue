@@ -151,6 +151,9 @@ let lastTokenRateAt = 0
 const STREAM_HTML_MS = 80
 const TOKEN_RATE_MS = 200
 
+const attachHelpText =
+  'Можно прикрепить файл (скрепка): Excel, Word, PowerPoint, PDF, TXT, MD, CSV, JSON. Текст файла попадёт в контекст чата (до ~20 тыс. символов).'
+
 const hasProvider = computed(() => Boolean(auth.me?.hasAiProvider))
 const providers = computed(() => auth.me?.providers?.filter((p) => p.enabled) ?? [])
 const active = computed(() => tabs.value.find((t) => t.id === activeId.value) ?? null)
@@ -416,12 +419,6 @@ function applyHint(text: string) {
   const tab = active.value
   if (!tab || tab.streaming) return
   tab.draft = text
-}
-
-function toggleIncludeDoc() {
-  const tab = active.value
-  if (!tab) return
-  tab.includeDoc = !tab.includeDoc
 }
 
 function formatHistoryDate(value: string) {
@@ -1618,7 +1615,15 @@ function onComposerKey(event: KeyboardEvent) {
             :class="{ on: historyOpen }"
             @click="toggleHistory"
           >
-            ☰
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                d="M4 7h16M4 12h16M4 17h16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+              />
+            </svg>
           </button>
           <button
             v-if="hasSessionLog"
@@ -1627,9 +1632,19 @@ function onComposerKey(event: KeyboardEvent) {
             :title="logCopied ? 'Скопировано' : 'Скопировать лог'"
             @click="copySessionLog"
           >
-            {{ logCopied ? '✓' : '⎘' }}
+            <svg v-if="!logCopied" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
+              <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </button>
-          <button type="button" class="icon" title="Свернуть" @click="emit('toggle')">›</button>
+          <button type="button" class="icon" title="Свернуть" @click="emit('toggle')">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -1659,13 +1674,14 @@ function onComposerKey(event: KeyboardEvent) {
       <div v-if="!hasProvider" class="cta">
         <p class="cta-title">Подключите AI-провайдер</p>
         <p class="cta-text">Добавьте ключ в настройках, чтобы ассистент мог работать с документом.</p>
-        <button type="button" class="primary" @click="goSettings">Открыть настройки</button>
+        <button type="button" class="ui-btn ui-btn--primary" @click="goSettings">Открыть настройки</button>
       </div>
       <div v-else-if="!active" class="cta"><p>Открываю чат…</p></div>
       <div v-else class="stack" :class="{ empty: !hasMessages }">
         <div v-if="!hasMessages" class="empty-state">
           <h3>{{ modeLabel(active.mode) }}</h3>
           <p>Напишите задачу или выберите подсказку.</p>
+          <p class="attach-help">{{ attachHelpText }}</p>
           <div class="hints">
             <button
               v-for="hint in emptyHints"
@@ -1769,17 +1785,7 @@ function onComposerKey(event: KeyboardEvent) {
 
         <div class="composer" :class="{ 'drop-up': hasMessages }">
           <p v-if="attachError" class="attach-error">{{ attachError }}</p>
-          <div class="context-chips">
-            <button
-              type="button"
-              class="chip"
-              :class="{ on: active.includeDoc }"
-              :disabled="!docName"
-              title="Включить текущий документ в контекст"
-              @click="toggleIncludeDoc"
-            >
-              Документ{{ docName ? `: ${docName}` : '' }}
-            </button>
+          <div v-if="active.attachments.length" class="context-chips">
             <button
               v-for="(file, index) in active.attachments"
               :key="file.name + index"
@@ -1806,9 +1812,22 @@ function onComposerKey(event: KeyboardEvent) {
                 :class="active.mode"
                 @click="modeMenu = !modeMenu; modelMenu = false; historyOpen = false"
               >
-                <span v-if="active.mode === 'agent'" class="glyph">⌘</span>
-                <span v-else-if="active.mode === 'plan'" class="glyph">☰</span>
-                <span v-else class="glyph">○</span>
+                <span v-if="active.mode === 'agent'" class="glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="12" height="12">
+                    <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+                    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" />
+                  </svg>
+                </span>
+                <span v-else-if="active.mode === 'plan'" class="glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                  </svg>
+                </span>
+                <span v-else class="glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="12" height="12">
+                    <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" />
+                  </svg>
+                </span>
                 {{ modeLabel(active.mode) }}
                 <span class="caret">▾</span>
               </button>
@@ -1837,23 +1856,34 @@ function onComposerKey(event: KeyboardEvent) {
               </div>
             </div>
             <div class="composer-actions">
-              <button type="button" class="icon-btn" title="Вложение" @click="pickAttach">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    d="M8 12.5 14.2 6.3a3 3 0 0 1 4.2 4.2l-7.4 7.4a4.2 4.2 0 0 1-6-6L12 5"
-                  />
-                </svg>
-              </button>
-              <input
-                ref="fileInput"
-                type="file"
-                accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md,.csv,.json"
-                hidden
-                @change="onAttach"
-              />
+              <div class="attach-wrap">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-label="Вложение"
+                  aria-describedby="attach-help-popover"
+                  @click="pickAttach"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      d="M8 12.5 14.2 6.3a3 3 0 0 1 4.2 4.2l-7.4 7.4a4.2 4.2 0 0 1-6-6L12 5"
+                    />
+                  </svg>
+                </button>
+                <div id="attach-help-popover" class="attach-popover" role="tooltip">
+                  {{ attachHelpText }}
+                </div>
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept=".xlsx,.xls,.docx,.pptx,.pdf,.txt,.md,.csv,.json"
+                  hidden
+                  @change="onAttach"
+                />
+              </div>
               <button
                 type="button"
                 class="send"
@@ -2008,8 +2038,16 @@ function onComposerKey(event: KeyboardEvent) {
   color: var(--fg-1);
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.icon:focus-visible,
+.plus:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .plus:hover,
 .icon:hover,
@@ -2146,7 +2184,9 @@ function onComposerKey(event: KeyboardEvent) {
 }
 .empty-state h3 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 1.05rem;
+  letter-spacing: -0.02em;
   color: var(--fg-0);
   font-weight: 650;
 }
@@ -2154,6 +2194,13 @@ function onComposerKey(event: KeyboardEvent) {
   margin: 0 0 8px;
   color: var(--fg-3);
   font-size: 0.88rem;
+}
+.empty-state .attach-help {
+  margin: 0 0 10px;
+  max-width: 280px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--fg-3);
 }
 .hints {
   display: grid;
@@ -2164,11 +2211,15 @@ function onComposerKey(event: KeyboardEvent) {
   border: 1px solid var(--border);
   background: var(--bg-2);
   color: var(--fg-1);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   cursor: pointer;
   font-size: 0.86rem;
   line-height: 1.35;
+}
+.hint:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .hint:hover:not(:disabled) {
   border-color: var(--accent);
@@ -2419,9 +2470,15 @@ button.go:disabled {
   position: relative;
   margin: 8px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--bg-2);
   padding: 8px;
+}
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
 }
 .context-chips {
   display: flex;
@@ -2435,7 +2492,7 @@ button.go:disabled {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg-3);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 3px 9px;
   font-size: 0.74rem;
   cursor: pointer;
@@ -2465,13 +2522,18 @@ button.go:disabled {
   color: var(--fg-0);
   padding: 4px 6px;
   min-height: 56px;
+  border-radius: var(--radius-sm);
 }
-.composer textarea:focus,
-.composer textarea:focus-visible,
-.composer :is(button, .pill, .model, .send, .icon-btn, .chip):focus,
+.composer textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer :is(button, .pill, .model, .send, .icon-btn, .chip):focus {
+  outline: none;
+}
 .composer :is(button, .pill, .model, .send, .icon-btn, .chip):focus-visible {
   outline: none;
-  box-shadow: none;
+  box-shadow: var(--focus-ring);
 }
 .composer-bar {
   display: flex;
@@ -2488,10 +2550,13 @@ button.go:disabled {
 }
 .pill,
 .model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg-2);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 3px 8px;
   cursor: pointer;
   font-size: 0.78rem;
@@ -2513,7 +2578,8 @@ button.go:disabled {
   min-width: 160px;
   background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
   padding: 4px;
   display: grid;
 }
@@ -2552,13 +2618,51 @@ button.go:disabled {
   align-items: center;
   gap: 4px;
 }
+.attach-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.attach-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  width: 240px;
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  color: var(--fg-2);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+.attach-wrap:hover .attach-popover,
+.attach-wrap:focus-within .attach-popover {
+  opacity: 1;
+  visibility: visible;
+}
 .icon-btn {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--fg-2);
   cursor: pointer;
   border-radius: 8px;
-  padding: 4px 6px;
+  line-height: 0;
+}
+.icon-btn svg {
+  display: block;
 }
 .icon-btn:hover {
   color: var(--fg-0);
@@ -2605,19 +2709,11 @@ button.go:disabled {
   gap: 8px;
   margin-top: 8px;
 }
-button.primary {
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: white;
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
 .modal-back {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 30;
+  background: var(--overlay);
+  z-index: var(--z-plan-modal);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -2627,7 +2723,8 @@ button.primary {
   height: min(80vh, 640px);
   background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   padding: 12px;

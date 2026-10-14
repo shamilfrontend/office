@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Variant G">
+  <!-- list / lines mark -->
+  <rect width="512" height="512" rx="96" fill="#1b1b1c"/>
+  <rect x="128" y="148" width="56" height="56" rx="14" fill="#5686fe"/>
+  <rect x="212" y="162" width="172" height="28" rx="14" fill="#f9fafb"/>
+  <rect x="128" y="228" width="56" height="56" rx="14" fill="#2c2c2e"/>
+  <rect x="212" y="242" width="172" height="28" rx="14" fill="#cfd3d6"/>
+  <rect x="128" y="308" width="56" height="56" rx="14" fill="#2c2c2e"/>
+  <rect x="212" y="322" width="120" height="28" rx="14" fill="#cfd3d6"/>
+</svg>

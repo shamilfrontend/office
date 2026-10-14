@@ -1,0 +1,124 @@
+/* Shared flat UI primitives — no gradients, glow, or glass */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ui-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ui-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ui-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.ui-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+}
+
+.ui-btn--ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg-0);
+}
+
+.ui-btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.ui-btn--lg {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.ui-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--overlay);
+}
+
+.ui-modal {
+  width: min(480px, 100%);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.ui-dropdown {
+  position: absolute;
+  z-index: 20;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+.ui-dropdown button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+}
+
+.ui-dropdown button:hover {
+  background: var(--bg-hover);
+}
+
+.ui-dropdown button.danger {
+  color: var(--danger);
+}

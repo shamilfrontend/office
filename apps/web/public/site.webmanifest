@@ -4,8 +4,8 @@
   "description": "Таблицы и документы с AI",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "background_color": "#151517",
+  "theme_color": "#151517",
   "icons": [
     {
       "src": "/logo-192.png",

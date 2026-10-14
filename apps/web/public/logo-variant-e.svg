@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Variant E">
+  <!-- abstract grid tile -->
+  <rect width="512" height="512" rx="96" fill="#1b1b1c"/>
+  <rect x="104" y="104" width="140" height="140" rx="28" fill="#5686fe"/>
+  <rect x="268" y="104" width="140" height="140" rx="28" fill="#2c2c2e"/>
+  <rect x="104" y="268" width="140" height="140" rx="28" fill="#2c2c2e"/>
+  <rect x="268" y="268" width="140" height="140" rx="28" fill="#f9fafb"/>
+</svg>

@@ -366,10 +366,16 @@ h3 {
 }
 .list li {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
+}
+.list .row button,
+.profile > button {
+  padding: 6px 10px;
+  font-size: 0.85rem;
 }
 .form {
   display: grid;

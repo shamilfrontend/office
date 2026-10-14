@@ -81,25 +81,46 @@ export function useUniverHost() {
     const { UniverSheetsDrawingPreset } = await import(
       '@univerjs/preset-sheets-drawing'
     )
+    const { UniverSheetsSortPreset } = await import(
+      '@univerjs/preset-sheets-sort'
+    )
+    const { UniverSheetsFilterPreset } = await import(
+      '@univerjs/preset-sheets-filter'
+    )
     const locale = (
       await import('@univerjs/preset-sheets-core/locales/ru-RU')
     ).default
     const drawingLocale = (
       await import('@univerjs/preset-sheets-drawing/locales/ru-RU')
     ).default
+    const sortLocale = (
+      await import('@univerjs/preset-sheets-sort/locales/ru-RU')
+    ).default
+    const filterLocale = (
+      await import('@univerjs/preset-sheets-filter/locales/ru-RU')
+    ).default
     await import('@univerjs/preset-sheets-core/lib/index.css')
     await import('@univerjs/preset-sheets-drawing/lib/index.css')
+    await import('@univerjs/preset-sheets-sort/lib/index.css')
+    await import('@univerjs/preset-sheets-filter/lib/index.css')
 
     const created = createUniver({
       locale: LocaleType.RU_RU,
       locales: {
-        [LocaleType.RU_RU]: mergeLocales(locale, drawingLocale),
+        [LocaleType.RU_RU]: mergeLocales(
+          locale,
+          drawingLocale,
+          sortLocale,
+          filterLocale,
+        ),
       },
       presets: [
         UniverSheetsCorePreset({
           container: container.value,
         }),
         UniverSheetsDrawingPreset(),
+        UniverSheetsSortPreset(),
+        UniverSheetsFilterPreset(),
       ],
     })
     const univer = created.univer as {

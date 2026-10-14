@@ -54,6 +54,29 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'replace_in_sheet',
+      description:
+        'Replace substring in literal cell values on the active sheet (case-insensitive). Skips formula cells. Caps at 50 cells.',
+      parameters: {
+        type: 'object',
+        properties: {
+          search: { type: 'string', description: 'Substring to find' },
+          replacement: {
+            type: 'string',
+            description: 'Replacement text (empty string allowed)',
+          },
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → used data range',
+          },
+        },
+        required: ['search', 'replacement'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'activate_sheet',
       description: 'Activate a sheet by name so subsequent tools operate on it',
       parameters: {
@@ -130,6 +153,92 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
           clear: { type: 'boolean', description: 'If true, cancel freeze' },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_filter',
+      description:
+        'Get active auto-filter on the sheet: range, criteria, filtered-out rows',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'sort_range',
+      description:
+        'Sort an A1 range (or active selection). by.column is 0-based index within the range (or letter converted relative to range start).',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          by: {
+            description:
+              'Column index within range, or {column, ascending?}, or array of those',
+          },
+        },
+        required: ['by'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_filter',
+      description:
+        'Create auto-filter on a range (or selection). If a filter exists and replace=true, replaces it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          replace: {
+            type: 'boolean',
+            description: 'Default true: remove existing filter first if needed',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_filter',
+      description: 'Remove the active auto-filter on the sheet',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_column_filter',
+      description:
+        'Set or clear filter criteria on a sheet column (letter or 0-based absolute index). Requires create_filter first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          column: {
+            description: 'Column letter (A) or 0-based sheet index',
+          },
+          values: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Visible values for the filter',
+          },
+          clear: {
+            type: 'boolean',
+            description: 'If true, remove criteria for this column',
+          },
+        },
+        required: ['column'],
       },
     },
   },
@@ -639,6 +748,7 @@ export function toolsForMode(
           'read_formulas',
           'search_in_sheet',
           'activate_sheet',
+          'get_filter',
         ]
       : hasDocument && docType === 'DOC'
         ? [
@@ -664,6 +774,11 @@ export function toolsForMode(
           'rename_sheet',
           'delete_sheet',
           'set_freeze',
+          'sort_range',
+          'create_filter',
+          'remove_filter',
+          'set_column_filter',
+          'replace_in_sheet',
         ]
       : hasDocument && docType === 'DOC'
         ? [

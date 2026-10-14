@@ -24,8 +24,10 @@ import {
   indexToColLetters,
   parseA1Cell,
   resolveColumnIndex,
+  type SheetFilterHandle,
   type SheetHandle,
   type SheetRange,
+  type SheetSortBy,
 } from './selection'
 import type { DocParagraph, UniverApi, UniverDocument } from './useUniver'
 
@@ -54,6 +56,11 @@ const WRITE_TOOL_NAMES = new Set([
   'rename_sheet',
   'delete_sheet',
   'set_freeze',
+  'sort_range',
+  'create_filter',
+  'remove_filter',
+  'set_column_filter',
+  'replace_in_sheet',
   'replace_text',
   'replace_selection',
   'insert_text',
@@ -98,7 +105,9 @@ export function needsApprove(
     name === 'clear_range' ||
     name === 'merge_range' ||
     name === 'replace_text' ||
-    name === 'delete_sheet'
+    name === 'replace_in_sheet' ||
+    name === 'delete_sheet' ||
+    name === 'sort_range'
   ) {
     return true
   }
@@ -189,7 +198,7 @@ export function describeImpact(
       : Number(args.numRows) || 0
     return { title, detail: `~${n} строк` }
   }
-  if (name === 'replace_text') {
+  if (name === 'replace_text' || name === 'replace_in_sheet') {
     const search = String(args.search ?? '').slice(0, 40)
     return { title, detail: `замена «${search}»` }
   }
@@ -239,6 +248,27 @@ export function describeImpact(
     if (Number.isFinite(cols)) parts.push(`${cols} столбцов`)
     return { title, detail: parts.length ? parts.join(', ') : 'закрепление' }
   }
+  if (name === 'sort_range') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    const area = a1 === 'выделение' ? 0 : estimateA1Area(a1)
+    return {
+      title,
+      detail: area > 0 ? `${a1} (~${area} ячеек)` : a1,
+    }
+  }
+  if (name === 'create_filter') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    return { title, detail: a1 }
+  }
+  if (name === 'remove_filter') {
+    return { title, detail: 'активный фильтр' }
+  }
+  if (name === 'set_column_filter') {
+    const col = args.column != null ? String(args.column) : '?'
+    if (args.clear) return { title, detail: `очистить колонку ${col}` }
+    const values = Array.isArray(args.values) ? args.values.length : 0
+    return { title, detail: `колонка ${col}, ${values} значений` }
+  }
   return { title, detail: '' }
 }
 
@@ -283,6 +313,29 @@ export const OFFICE_TOOLS = [
         type: 'object',
         properties: { query: { type: 'string' } },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'replace_in_sheet',
+      description:
+        'Replace substring in literal cell values on the active sheet (case-insensitive). Skips formula cells. Caps at 50 cells.',
+      parameters: {
+        type: 'object',
+        properties: {
+          search: { type: 'string', description: 'Substring to find' },
+          replacement: {
+            type: 'string',
+            description: 'Replacement text (empty string allowed)',
+          },
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → used data range',
+          },
+        },
+        required: ['search', 'replacement'],
       },
     },
   },
@@ -353,6 +406,91 @@ export const OFFICE_TOOLS = [
           columns: { type: 'number', description: 'Number of frozen columns from left' },
           clear: { type: 'boolean', description: 'If true, cancel freeze' },
         },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_filter',
+      description: 'Get active auto-filter on the sheet: range, criteria, filtered-out rows',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'sort_range',
+      description:
+        'Sort an A1 range (or active selection). by.column is 0-based index within the range (or letter converted relative to range start).',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          by: {
+            description:
+              'Column index within range, or {column, ascending?}, or array of those',
+          },
+        },
+        required: ['by'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'create_filter',
+      description:
+        'Create auto-filter on a range (or selection). If a filter exists and replace=true, replaces it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          replace: {
+            type: 'boolean',
+            description: 'Default true: remove existing filter first if needed',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'remove_filter',
+      description: 'Remove the active auto-filter on the sheet',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'set_column_filter',
+      description:
+        'Set or clear filter criteria on a sheet column (letter or 0-based absolute index). Requires create_filter first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          column: {
+            description: 'Column letter (A) or 0-based sheet index',
+          },
+          values: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Visible values for the filter',
+          },
+          clear: {
+            type: 'boolean',
+            description: 'If true, remove criteria for this column',
+          },
+        },
+        required: ['column'],
       },
     },
   },
@@ -815,6 +953,7 @@ export function toolsForMode(
           'read_formulas',
           'search_in_sheet',
           'activate_sheet',
+          'get_filter',
         ]
       : hasDocument && docType === 'DOC'
         ? [
@@ -840,6 +979,11 @@ export function toolsForMode(
           'rename_sheet',
           'delete_sheet',
           'set_freeze',
+          'sort_range',
+          'create_filter',
+          'remove_filter',
+          'set_column_filter',
+          'replace_in_sheet',
         ]
       : hasDocument && docType === 'DOC'
         ? [
@@ -1013,10 +1157,136 @@ function resolveSheetRangeA1(
   }
 }
 
+function getRangeStartColumn(range: SheetRange, a1: string): number {
+  const bounds = range.getRange?.()
+  if (bounds && typeof bounds.startColumn === 'number') return bounds.startColumn
+  if (typeof range.getColumn === 'function') {
+    const col = range.getColumn()
+    if (typeof col === 'number' && Number.isFinite(col)) return col
+  }
+  const cell = a1.replace(/^[^!]*!/, '').split(':')[0]?.trim() ?? ''
+  const withRow = /^\$?[A-Za-z]+$/.test(cell) ? `${cell}1` : cell
+  return parseA1Cell(withRow)?.col ?? 0
+}
+
+function resolveSortColumnRef(
+  column: unknown,
+  startColumn: number,
+): number | { error: string } {
+  if (typeof column === 'number' && Number.isFinite(column)) {
+    const n = Math.floor(column)
+    return n >= 0 ? n : { error: `invalid sort column: ${column}` }
+  }
+  const text = String(column ?? '').trim()
+  if (!text) return { error: 'sort column required' }
+  if (/^[A-Za-z]+$/.test(text)) {
+    const abs = resolveColumnIndex(text)
+    if (abs == null) return { error: `invalid sort column: ${text}` }
+    const relative = abs - startColumn
+    return relative >= 0 ? relative : { error: `column ${text} outside range` }
+  }
+  const n = resolveColumnIndex(text)
+  if (n == null) return { error: `invalid sort column: ${text}` }
+  return n
+}
+
+function parseSortBy(
+  byArg: unknown,
+  startColumn: number,
+): SheetSortBy | { error: string } {
+  const one = (
+    item: unknown,
+  ): number | { column: number; ascending?: boolean } | { error: string } => {
+    if (typeof item === 'number' || typeof item === 'string') {
+      return resolveSortColumnRef(item, startColumn)
+    }
+    if (item && typeof item === 'object') {
+      const obj = item as { column?: unknown; ascending?: unknown }
+      const col = resolveSortColumnRef(obj.column, startColumn)
+      if (typeof col !== 'number') return col
+      if (obj.ascending === undefined) return { column: col }
+      return { column: col, ascending: Boolean(obj.ascending) }
+    }
+    return { error: 'invalid sort by' }
+  }
+  if (Array.isArray(byArg)) {
+    if (!byArg.length) return { error: 'by required' }
+    const out: Array<{ column: number; ascending?: boolean }> = []
+    for (const item of byArg) {
+      const parsed = one(item)
+      if (typeof parsed === 'object' && 'error' in parsed) return parsed
+      if (typeof parsed === 'number') out.push({ column: parsed })
+      else out.push(parsed)
+    }
+    return out
+  }
+  return one(byArg)
+}
+
+function serializeFilter(filter: SheetFilterHandle): {
+  range: string | null
+  criteria: Array<{ column: number; criteria: unknown }>
+  filteredOutRows: number[]
+} {
+  const rangeObj = filter.getRange?.()
+  let rangeA1: string | null = null
+  let startCol = 0
+  let endCol = -1
+  if (rangeObj) {
+    if ('getA1Notation' in rangeObj && typeof rangeObj.getA1Notation === 'function') {
+      rangeA1 = rangeObj.getA1Notation() ?? null
+    }
+    if ('getRange' in rangeObj && typeof rangeObj.getRange === 'function') {
+      const bounds = rangeObj.getRange()
+      if (bounds) {
+        startCol = bounds.startColumn
+        endCol = bounds.endColumn
+      }
+    }
+  }
+  const criteria: Array<{ column: number; criteria: unknown }> = []
+  if (endCol >= startCol && filter.getColumnFilterCriteria) {
+    for (let col = startCol; col <= endCol; col++) {
+      const c = filter.getColumnFilterCriteria(col)
+      if (c) criteria.push({ column: col, criteria: c })
+    }
+  }
+  const rawOut = filter.getFilteredOutRows?.()
+  const filteredOutRows = Array.isArray(rawOut)
+    ? rawOut
+    : rawOut
+      ? Array.from(rawOut)
+      : []
+  return { range: rangeA1, criteria, filteredOutRows }
+}
+
 function mapHorizontalAlign(value: string): 'left' | 'center' | 'normal' | null {
   if (value === 'left' || value === 'center') return value
   if (value === 'right') return 'normal'
   return null
+}
+
+/** Case-insensitive substring replace (all occurrences); not regex. */
+function replaceAllCaseInsensitive(
+  text: string,
+  search: string,
+  replacement: string,
+): string {
+  if (!search) return text
+  const lower = text.toLowerCase()
+  const needle = search.toLowerCase()
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const at = lower.indexOf(needle, i)
+    if (at < 0) {
+      out += text.slice(i)
+      break
+    }
+    out += text.slice(i, at) + replacement
+    i = at + search.length
+  }
+  return out
 }
 
 function truncateMatrix(values: unknown[][]): {
@@ -1241,6 +1511,165 @@ export async function runOfficeTool(
         })
       }
     }
+    if (name === 'get_filter') {
+      try {
+        const filter = sheet.getFilter?.() ?? null
+        if (!filter) {
+          return JSON.stringify({
+            ok: true,
+            sheet: sheet.getSheetName(),
+            filter: null,
+          })
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          filter: serializeFilter(filter),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'get_filter failed',
+        })
+      }
+    }
+    if (name === 'sort_range') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { a1, range } = resolved
+        if (!range.sort) {
+          return JSON.stringify({ error: 'sort_range not supported' })
+        }
+        if (args.by == null) return JSON.stringify({ error: 'by required' })
+        const startColumn = getRangeStartColumn(range, a1)
+        const by = parseSortBy(args.by, startColumn)
+        if (typeof by === 'object' && 'error' in by && !Array.isArray(by)) {
+          return JSON.stringify(by)
+        }
+        range.sort(by as SheetSortBy)
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          by,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'sort_range failed',
+        })
+      }
+    }
+    if (name === 'create_filter') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!range.createFilter) {
+          return JSON.stringify({ error: 'create_filter not supported' })
+        }
+        const replace = args.replace !== false
+        let filter = range.createFilter()
+        if (!filter && replace) {
+          const existing = sheet.getFilter?.() ?? range.getFilter?.()
+          existing?.remove?.()
+          filter = range.createFilter()
+        }
+        if (!filter) {
+          return JSON.stringify({
+            error: 'create_filter failed; filter may already exist (try replace: true)',
+          })
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          filter: serializeFilter(filter),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'create_filter failed',
+        })
+      }
+    }
+    if (name === 'remove_filter') {
+      try {
+        const filter = sheet.getFilter?.() ?? null
+        if (!filter) {
+          return JSON.stringify({
+            ok: true,
+            sheet: sheet.getSheetName(),
+            removed: false,
+            reason: 'no filter',
+          })
+        }
+        if (!filter.remove) {
+          return JSON.stringify({ error: 'remove_filter not supported' })
+        }
+        const ok = filter.remove()
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          removed: ok !== false,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'remove_filter failed',
+        })
+      }
+    }
+    if (name === 'set_column_filter') {
+      try {
+        const filter = sheet.getFilter?.() ?? null
+        if (!filter) {
+          return JSON.stringify({
+            error: 'no filter; call create_filter first',
+          })
+        }
+        const column = resolveColumnIndex(args.column as string | number)
+        if (column == null) {
+          return JSON.stringify({ error: 'invalid column' })
+        }
+        if (args.clear) {
+          if (!filter.removeColumnFilterCriteria) {
+            return JSON.stringify({ error: 'set_column_filter not supported' })
+          }
+          filter.removeColumnFilterCriteria(column)
+          return JSON.stringify({
+            ok: true,
+            sheet: sheet.getSheetName(),
+            column,
+            cleared: true,
+            filter: serializeFilter(filter),
+          })
+        }
+        if (!filter.setColumnFilterCriteria) {
+          return JSON.stringify({ error: 'set_column_filter not supported' })
+        }
+        const values = Array.isArray(args.values)
+          ? args.values.map((v) => String(v))
+          : null
+        if (!values?.length) {
+          return JSON.stringify({
+            error: 'pass values[] or clear: true',
+          })
+        }
+        filter.setColumnFilterCriteria(column, {
+          colId: column,
+          filters: { filters: values },
+        })
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          column,
+          values,
+          filter: serializeFilter(filter),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error ? error.message : 'set_column_filter failed',
+        })
+      }
+    }
     if (name === 'read_range') {
       try {
         let a1 = args.range != null ? String(args.range).trim() : ''
@@ -1342,6 +1771,100 @@ export async function runOfficeTool(
       } catch (error) {
         return JSON.stringify({
           error: error instanceof Error ? error.message : 'search_in_sheet failed',
+        })
+      }
+    }
+    if (name === 'replace_in_sheet') {
+      try {
+        const search = String(args.search ?? '')
+        if (!search) return JSON.stringify({ error: 'empty search' })
+        const replacement =
+          args.replacement != null ? String(args.replacement) : ''
+        const q = search.toLowerCase()
+
+        let searchRange = 'A1:Z200'
+        let originRow = 0
+        let originCol = 0
+        const rangeArg =
+          args.range != null ? String(args.range).trim() : ''
+        if (rangeArg) {
+          searchRange = rangeArg
+          const startCell = searchRange.replace(/^[^!]*!/, '').split(':')[0]
+          const parsed = parseA1Cell(
+            /^\$?[A-Za-z]+$/.test(startCell) ? `${startCell}1` : startCell,
+          )
+          if (parsed) {
+            originRow = parsed.row
+            originCol = parsed.col
+          }
+          try {
+            const bounds = sheet.getRange(searchRange).getRange?.()
+            if (bounds) {
+              originRow = bounds.startRow
+              originCol = bounds.startColumn
+            }
+          } catch {
+            /* keep parsed origin */
+          }
+        } else {
+          try {
+            const data = sheet.getDataRange()
+            searchRange = data.getA1Notation()
+            const bounds = data.getRange?.()
+            if (bounds) {
+              originRow = bounds.startRow
+              originCol = bounds.startColumn
+            } else {
+              const startCell = searchRange.split(':')[0]
+              const parsed = parseA1Cell(startCell)
+              if (parsed) {
+                originRow = parsed.row
+                originCol = parsed.col
+              }
+            }
+          } catch {
+            /* fallback A1:Z200 */
+          }
+        }
+
+        const range = sheet.getRange(searchRange)
+        const values = range.getValues() as unknown[][]
+        const formulas = (range.getFormulas?.() ?? []) as string[][]
+        const hits: Array<{ a1: string; from: string; to: string }> = []
+
+        values.forEach((row, r) =>
+          row.forEach((v, c) => {
+            const formula = String(formulas[r]?.[c] ?? '').trim()
+            if (formula) return
+            const from = String(v ?? '')
+            if (!from.toLowerCase().includes(q)) return
+            const to = replaceAllCaseInsensitive(from, search, replacement)
+            if (to === from) return
+            hits.push({
+              a1: a1FromRowCol(originRow + r, originCol + c),
+              from,
+              to,
+            })
+          }),
+        )
+
+        const truncated = hits.length > SEARCH_MAX_HITS
+        const toWrite = hits.slice(0, SEARCH_MAX_HITS)
+        for (const cell of toWrite) {
+          sheet.getRange(cell.a1).setValues([[cell.to]])
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: searchRange,
+          replaced: toWrite.length,
+          cells: toWrite,
+          truncated,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error ? error.message : 'replace_in_sheet failed',
         })
       }
     }

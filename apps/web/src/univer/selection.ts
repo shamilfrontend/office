@@ -20,15 +20,41 @@ export type DocSelectionInfo = {
 
 export type SelectionInfo = SheetSelectionInfo | DocSelectionInfo | { kind: 'none'; reason: string }
 
+export type SheetFilterCriteria = {
+  colId?: number
+  filters?: { filters?: string[] }
+}
+
+export type SheetFilterHandle = {
+  getRange?: () => SheetRange | { getA1Notation?: () => string }
+  remove?: () => unknown
+  setColumnFilterCriteria?: (
+    column: number,
+    criteria: SheetFilterCriteria | null,
+  ) => unknown
+  removeColumnFilterCriteria?: (column: number) => unknown
+  getColumnFilterCriteria?: (column: number) => SheetFilterCriteria | null
+  getFilteredOutRows?: () => number[] | Set<number>
+}
+
+export type SheetSortBy =
+  | number
+  | { column: number; ascending?: boolean }
+  | Array<{ column: number; ascending?: boolean }>
+
 export type SheetRange = {
   getA1Notation: (withSheet?: boolean) => string
   getValues: () => unknown[][]
   getFormulas: () => string[][]
   getDisplayValues?: () => string[][]
   getRange?: () => { startRow: number; startColumn: number; endRow: number; endColumn: number }
+  getColumn?: () => number
   setValues: (v: unknown[][]) => void
   setFormulas: (f: string[][]) => void
   clear: () => void
+  sort?: (by: SheetSortBy) => unknown
+  createFilter?: () => SheetFilterHandle | null
+  getFilter?: () => SheetFilterHandle | null
   setFontWeight?: (weight: 'bold' | 'normal' | null) => unknown
   setFontSize?: (size: number | null) => unknown
   setFontColor?: (color: string | null) => unknown
@@ -57,6 +83,8 @@ export type SheetHandle = {
   getDataRange: () => SheetRange
   setName?: (name: string) => unknown
   activate?: () => unknown
+  getFilter?: () => SheetFilterHandle | null
+  sort?: (by: SheetSortBy) => unknown
   setColumnWidth?: (columnPosition: number, width: number) => unknown
   setColumnWidths?: (startColumn: number, numColumn: number, width: number) => unknown
   setRowHeight?: (rowPosition: number, height: number) => unknown

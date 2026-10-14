@@ -3,7 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useRouter } from 'vue-router'
+import {
+  estimateChatContextUsage,
+  type ChatContextUsage,
+} from '@/ai/estimateChatContextUsage'
+import { chatTokenCalibrator } from '@/ai/estimateTokens'
 import { api, type ChatRecord, type ChatSummary } from '@/api/client'
+import ContextUsageIndicator from '@/components/ContextUsageIndicator.vue'
 import { uiConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import type { UniverApi } from '@/univer/useUniver'
@@ -143,13 +149,16 @@ const approveExpanded = ref(false)
 const copiedKey = ref('')
 const streamHtmlKey = ref('')
 const streamHtml = ref('')
+const contextUsage = ref<ChatContextUsage | null>(null)
 let logCopiedTimer: ReturnType<typeof setTimeout> | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 let streamHtmlTimer: ReturnType<typeof setTimeout> | null = null
+let contextUsageTimer: ReturnType<typeof setTimeout> | null = null
 let lastTokenRateAt = 0
 
 const STREAM_HTML_MS = 80
 const TOKEN_RATE_MS = 200
+const CONTEXT_USAGE_MS = 400
 
 const attachHelpText =
   'Можно прикрепить файл (скрепка): Excel, Word, PowerPoint, PDF, TXT, MD, CSV, JSON. Текст файла попадёт в контекст чата (до ~20 тыс. символов).'
@@ -251,6 +260,7 @@ function resetTabs() {
   copiedKey.value = ''
   clearStreamHtml()
   lastTokenRateAt = 0
+  contextUsage.value = null
   if (logCopiedTimer) {
     clearTimeout(logCopiedTimer)
     logCopiedTimer = null
@@ -259,6 +269,10 @@ function resetTabs() {
     clearTimeout(copiedTimer)
     copiedTimer = null
   }
+  if (contextUsageTimer) {
+    clearTimeout(contextUsageTimer)
+    contextUsageTimer = null
+  }
 }
 
 watch(
@@ -266,6 +280,62 @@ watch(
   () => {
     approveExpanded.value = false
   },
+)
+
+function refreshContextUsage() {
+  const tab = active.value
+  if (!tab || !tab.model) {
+    contextUsage.value = null
+    return
+  }
+  const hasDocument = Boolean(props.documentId || props.docName)
+  const wireMessages = trimWireForProvider(toWire(tab))
+  contextUsage.value = estimateChatContextUsage({
+    mode: tab.mode,
+    model: tab.model,
+    wireMessages,
+    draft: tab.draft,
+    attachments: tab.attachments,
+    includeDoc: tab.includeDoc,
+    docName: props.docName,
+    docType: props.docType,
+    selectionContext: tab.includeDoc
+      ? props.getSelectionContext?.()
+      : undefined,
+    buildingPlan: tab.executingPlan,
+    hasDocument,
+    calibrator: chatTokenCalibrator,
+  })
+}
+
+watch(
+  () => {
+    const tab = active.value
+    if (!tab) return null
+    return [
+      tab.id,
+      tab.mode,
+      tab.model,
+      tab.draft,
+      tab.includeDoc,
+      tab.executingPlan,
+      tab.attachments.length,
+      tab.attachments.reduce((n, f) => n + f.text.length, 0),
+      tab.messages.length,
+      tab.messages.map((m) => m.key).join(','),
+      props.docName,
+      props.docType,
+      props.documentId,
+    ] as const
+  },
+  () => {
+    if (contextUsageTimer) clearTimeout(contextUsageTimer)
+    contextUsageTimer = setTimeout(() => {
+      contextUsageTimer = null
+      refreshContextUsage()
+    }, CONTEXT_USAGE_MS)
+  },
+  { immediate: true },
 )
 
 function pushSessionLog(
@@ -355,6 +425,10 @@ onMounted(() => {
   if (props.documentId) void loadTabs()
 })
 onBeforeUnmount(() => {
+  if (contextUsageTimer) {
+    clearTimeout(contextUsageTimer)
+    contextUsageTimer = null
+  }
   resetTabs()
 })
 
@@ -1086,6 +1160,18 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
     let usageCompletion: number | null = null
     const messages = trimWireForProvider(toWire(tab))
     const heuristicPrompt = JSON.stringify(messages).length / 4
+    const promptEstimate = estimateChatContextUsage({
+      mode: tab.mode,
+      model: tab.model,
+      wireMessages: messages,
+      draft: '',
+      attachments: [],
+      includeDoc: false,
+      buildingPlan: tab.executingPlan,
+      hasDocument: Boolean(props.documentId || props.docName),
+      docType: props.docType,
+      calibrator: chatTokenCalibrator,
+    }).usedTokens
 
     try {
       await streamChat(
@@ -1178,6 +1264,13 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
 
     const promptTokens = usagePrompt ?? heuristicPrompt
     const completionTokens = usageCompletion ?? assistant.content.length / 4
+    if (usagePrompt != null) {
+      const rawEstimate = Math.round(
+        promptEstimate / Math.max(0.01, chatTokenCalibrator.getFactor()),
+      )
+      chatTokenCalibrator.observe(rawEstimate, usagePrompt)
+      refreshContextUsage()
+    }
     const rate = tab.tokenRate ?? 0
     const usageTag =
       usagePrompt != null || usageCompletion != null ? '' : ' ≈'
@@ -1856,6 +1949,7 @@ function onComposerKey(event: KeyboardEvent) {
               </div>
             </div>
             <div class="composer-actions">
+              <ContextUsageIndicator :usage="contextUsage" />
               <div class="attach-wrap">
                 <button
                   type="button"

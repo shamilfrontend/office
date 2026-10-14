@@ -5,10 +5,16 @@ import { api } from '@/api/client'
 import { uiConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
+import { useAiToolPermissions } from '@/composables/useAiToolPermissions'
 
 const auth = useAuthStore()
 const router = useRouter()
 const { preference: theme, setTheme } = useTheme()
+const {
+  permissions: aiPermissions,
+  categories: aiPermissionCategories,
+  setCategoryAllowed,
+} = useAiToolPermissions()
 const providers = ref<
   Array<{
     id: string
@@ -266,6 +272,28 @@ async function logout() {
             </div>
           </label>
         </section>
+
+        <section>
+          <h3>Разрешения AI</h3>
+          <p class="muted">Не спрашивать подтверждение для выбранных правок</p>
+          <ul class="perm-list">
+            <li v-for="cat in aiPermissionCategories" :key="cat.id">
+              <label class="perm-row">
+                <input
+                  type="checkbox"
+                  :checked="aiPermissions[cat.id]"
+                  @change="
+                    setCategoryAllowed(
+                      cat.id,
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
+                />
+                <span>{{ cat.label }}</span>
+              </label>
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
   </div>
@@ -431,5 +459,27 @@ select:focus-visible {
 .theme-switch button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+.perm-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-1);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.perm-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 </style>

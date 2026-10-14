@@ -11,6 +11,7 @@ import { chatTokenCalibrator } from '@/ai/estimateTokens'
 import { api, type ChatRecord, type ChatSummary } from '@/api/client'
 import ContextUsageIndicator from '@/components/ContextUsageIndicator.vue'
 import { uiConfirm } from '@/composables/useConfirm'
+import { isToolAutoAllowed } from '@/composables/useAiToolPermissions'
 import { useAuthStore } from '@/stores/auth'
 import type { UniverApi } from '@/univer/useUniver'
 import {
@@ -54,6 +55,8 @@ type SessionLogEntry = {
   status?: 'ok' | 'error' | 'pending'
 }
 
+type PlanRunState = 'idle' | 'running' | 'done'
+
 type Tab = {
   id: string
   title: string
@@ -68,6 +71,7 @@ type Tab = {
   planTitle: string | null
   planMarkdown: string | null
   planEdited: boolean
+  planRunState: PlanRunState
   streaming: boolean
   tokenRate: number | null
   tokenMeta: string | null
@@ -134,7 +138,13 @@ const modelMenuError = ref('')
 const planOpen = ref(false)
 const planDraft = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const composerEl = ref<HTMLTextAreaElement | null>(null)
 const transcriptEl = ref<HTMLElement | null>(null)
+const modeWrap = ref<HTMLElement | null>(null)
+const modelWrap = ref<HTMLElement | null>(null)
+const historyBtn = ref<HTMLElement | null>(null)
+const historyPanel = ref<HTMLElement | null>(null)
+const planModal = ref<HTMLElement | null>(null)
 const attachError = ref('')
 const sessionLog = ref<SessionLogEntry[]>([])
 const logCopied = ref(false)
@@ -174,9 +184,9 @@ const panelStyle = computed(() =>
 const planOverview = computed(() => {
   const tab = active.value
   if (!tab?.planMarkdown) return ''
-  if (tab.plan?.overview) return tab.plan.overview
+  if (tab.plan?.overview) return tab.plan.overview.slice(0, 160)
   const body = tab.planMarkdown.replace(/^#.*\n+/, '')
-  return body.split('\n').filter(Boolean).slice(0, 4).join(' ').slice(0, 280)
+  return body.split('\n').filter(Boolean).slice(0, 2).join(' ').slice(0, 160)
 })
 const composerPlaceholder = computed(() => {
   const mode = active.value?.mode
@@ -421,6 +431,59 @@ watch(
   },
 )
 
+function closeFloatingOnOutside(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+
+  if (modeMenu.value && !modeWrap.value?.contains(target)) {
+    modeMenu.value = false
+  }
+  if (modelMenu.value && !modelWrap.value?.contains(target)) {
+    modelMenu.value = false
+  }
+  if (
+    historyOpen.value &&
+    !historyPanel.value?.contains(target) &&
+    !historyBtn.value?.contains(target)
+  ) {
+    historyOpen.value = false
+  }
+  if (planOpen.value && !planModal.value?.contains(target)) {
+    planOpen.value = false
+  }
+}
+
+function onFloatingKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (planOpen.value) {
+    planOpen.value = false
+    return
+  }
+  if (modeMenu.value || modelMenu.value || historyOpen.value) {
+    modeMenu.value = false
+    modelMenu.value = false
+    historyOpen.value = false
+  }
+}
+
+const floatingUiOpen = computed(
+  () => modeMenu.value || modelMenu.value || historyOpen.value || planOpen.value,
+)
+
+watch(
+  floatingUiOpen,
+  (open, _prev, onCleanup) => {
+    if (!open) return
+    document.addEventListener('pointerdown', closeFloatingOnOutside, true)
+    document.addEventListener('keydown', onFloatingKeydown)
+    onCleanup(() => {
+      document.removeEventListener('pointerdown', closeFloatingOnOutside, true)
+      document.removeEventListener('keydown', onFloatingKeydown)
+    })
+  },
+  { flush: 'post' },
+)
+
 onMounted(() => {
   if (props.documentId) void loadTabs()
 })
@@ -429,6 +492,8 @@ onBeforeUnmount(() => {
     clearTimeout(contextUsageTimer)
     contextUsageTimer = null
   }
+  document.removeEventListener('pointerdown', closeFloatingOnOutside, true)
+  document.removeEventListener('keydown', onFloatingKeydown)
   resetTabs()
 })
 
@@ -519,7 +584,7 @@ function asMode(value: string): ChatMode {
 }
 
 function modeLabel(mode: ChatMode) {
-  if (mode === 'plan') return 'Планирование'
+  if (mode === 'plan') return 'План'
   if (mode === 'chat') return 'Чат'
   return 'Агент'
 }
@@ -539,6 +604,45 @@ function planToMarkdown(plan: Plan) {
   return `# ${plan.name}\n\n${plan.overview}\n\n${todos}`.trim()
 }
 
+function parsePlanMarkdown(markdown: string): Plan {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
+  let name = 'План'
+  let i = 0
+  if (lines[0]?.startsWith('# ')) {
+    name = lines[0].slice(2).trim() || 'План'
+    i = 1
+    while (i < lines.length && !lines[i].trim()) i += 1
+  }
+  const overviewLines: string[] = []
+  while (i < lines.length && !/^-\s+\[[ xX]\]\s+/.test(lines[i])) {
+    overviewLines.push(lines[i])
+    i += 1
+  }
+  const todos: Plan['todos'] = []
+  while (i < lines.length) {
+    const match = lines[i].match(/^-\s+\[([ xX])\]\s+(.+)$/)
+    if (match) {
+      const done = match[1].toLowerCase() === 'x'
+      todos.push({
+        id: String(todos.length + 1),
+        content: match[2].trim(),
+        ...(done ? { status: 'completed' } : {}),
+      })
+    }
+    i += 1
+  }
+  return {
+    name,
+    overview: overviewLines.join('\n').trim(),
+    todos,
+  }
+}
+
+function planAllTodosDone(plan: Plan | null): boolean {
+  if (!plan?.todos.length) return false
+  return plan.todos.every((t) => t.status === 'done' || t.status === 'completed')
+}
+
 function titleFromMarkdown(markdown: string, fallback: string) {
   const heading = markdown.match(/^#\s+(.+)$/m)
   return (heading?.[1] || fallback).trim() || 'План'
@@ -556,6 +660,7 @@ function tabFromRecord(record: ChatRecord): Tab {
     providers.value.find((item) => item.id === providerId)?.model ||
     providers.value[0]?.model ||
     ''
+  const plan = record.planMarkdown ? parsePlanMarkdown(record.planMarkdown) : null
   return {
     id: record.id,
     title: record.title || 'Новый чат',
@@ -566,10 +671,11 @@ function tabFromRecord(record: ChatRecord): Tab {
     attachments: [],
     includeDoc: true,
     messages: record.messages.map(messageFromRecord),
-    plan: null,
+    plan,
     planTitle: record.planTitle,
     planMarkdown: record.planMarkdown,
-    planEdited: Boolean(record.planMarkdown),
+    planEdited: false,
+    planRunState: planAllTodosDone(plan) ? 'done' : 'idle',
     streaming: false,
     tokenRate: null,
     tokenMeta: null,
@@ -955,7 +1061,9 @@ async function savePlan() {
   if (!tab) return
   tab.planMarkdown = planDraft.value
   tab.planTitle = titleFromMarkdown(planDraft.value, tab.planTitle || 'План')
+  tab.plan = parsePlanMarkdown(planDraft.value)
   tab.planEdited = true
+  tab.planRunState = 'idle'
   planOpen.value = false
   await patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
 }
@@ -963,17 +1071,29 @@ async function savePlan() {
 async function runPlan() {
   const tab = active.value
   if (!tab?.planMarkdown || tab.streaming) return
-  const title = tab.planTitle || 'План'
+  if (!tab.plan) tab.plan = parsePlanMarkdown(tab.planMarkdown)
+  const title = tab.planTitle || tab.plan.name || 'План'
   tab.mode = 'agent'
   tab.executingPlan = true
+  tab.planRunState = 'running'
   await patchTab(tab, { mode: 'agent' })
   try {
     await send({
       display: `Сделать по плану «${title}»`,
       wire: `Сделать по плану «${title}»\n\n---\n${tab.planMarkdown}`,
     })
+    const stopped =
+      tab.retryReason === 'Остановлено' || tab.retryReason === 'Отклонено'
+    if (stopped) {
+      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle'
+    } else {
+      tab.planRunState = 'done'
+    }
   } finally {
     tab.executingPlan = false
+    if (tab.planRunState === 'running') {
+      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle'
+    }
   }
 }
 
@@ -1020,6 +1140,7 @@ async function send(preset?: { display: string; wire: string }) {
   pushSessionLog(tab, { kind: 'user', content: wire })
   tab.draft = ''
   tab.attachments = []
+  void nextTick(resizeComposer)
   tab.streaming = true
   tab.tokenRate = null
   tab.tokenMeta = null
@@ -1345,6 +1466,7 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
       const apiRef = props.univerApi ?? null
       if (
         !tab.allowedTools.has(call.name) &&
+        !isToolAutoAllowed(call.name) &&
         needsApprove(call.name, args, apiRef)
       ) {
         const ok = await askApprove(tab, call.name, args)
@@ -1385,10 +1507,16 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
         })
       }
       if ((call.name === 'create_plan' || call.name === 'update_plan') && tab.plan) {
-        if (call.name === 'create_plan' || !tab.planEdited) {
+        if (call.name === 'create_plan') {
           tab.planEdited = false
+          tab.planRunState = 'idle'
           tab.planTitle = tab.plan.name
           tab.planMarkdown = planToMarkdown(tab.plan)
+          void patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
+        } else if (tab.executingPlan || !tab.planEdited) {
+          tab.planTitle = tab.plan.name
+          tab.planMarkdown = planToMarkdown(tab.plan)
+          if (planAllTodosDone(tab.plan)) tab.planRunState = 'done'
           void patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
         }
       }
@@ -1656,12 +1784,27 @@ function startResize(event: PointerEvent) {
   window.addEventListener('pointerup', up)
 }
 
-function onComposerKey(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-    event.preventDefault()
-    void send()
-  }
+function resizeComposer() {
+  const el = composerEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
 }
+
+function onComposerKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.isComposing) return
+  if (event.shiftKey) return
+  event.preventDefault()
+  void send()
+}
+
+watch(
+  () => [activeId.value, active.value?.draft] as const,
+  async () => {
+    await nextTick()
+    resizeComposer()
+  },
+)
 </script>
 
 <template>
@@ -1702,6 +1845,7 @@ function onComposerKey(event: KeyboardEvent) {
         <div class="tab-actions">
           <button type="button" class="plus" title="Новый чат" @click="addTab">+</button>
           <button
+            ref="historyBtn"
             type="button"
             class="icon"
             title="История"
@@ -1719,10 +1863,16 @@ function onComposerKey(event: KeyboardEvent) {
             </svg>
           </button>
           <button
-            v-if="hasSessionLog"
             type="button"
             class="icon"
-            :title="logCopied ? 'Скопировано' : 'Скопировать лог'"
+            :disabled="!hasSessionLog"
+            :title="
+              logCopied
+                ? 'Скопировано'
+                : hasSessionLog
+                  ? 'Скопировать лог сессии'
+                  : 'Лог пуст'
+            "
             @click="copySessionLog"
           >
             <svg v-if="!logCopied" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -1741,7 +1891,7 @@ function onComposerKey(event: KeyboardEvent) {
         </div>
       </header>
 
-      <div v-if="historyOpen" class="history-panel">
+      <div v-if="historyOpen" ref="historyPanel" class="history-panel">
         <div class="history-head">
           <span>Закрытые чаты</span>
           <button type="button" class="text" @click="historyOpen = false">Закрыть</button>
@@ -1864,19 +2014,40 @@ function onComposerKey(event: KeyboardEvent) {
           </div>
         </div>
 
-        <section v-if="active.planMarkdown" class="plan-card">
-          <div class="kicker">План</div>
+        <section v-if="active.planMarkdown" class="plan-card" :class="active.planRunState">
+          <div class="kicker">
+            <span>План</span>
+            <span v-if="active.planRunState === 'done'" class="plan-badge">Выполнено</span>
+            <span v-else-if="active.planRunState === 'running'" class="plan-badge running">
+              Выполняется…
+            </span>
+          </div>
           <h4>{{ active.planTitle || 'План' }}</h4>
           <p>{{ planOverview }}</p>
           <div class="plan-actions">
             <button type="button" class="text" @click="openPlan">Открыть</button>
-            <button type="button" class="go" :disabled="active.streaming" @click="runPlan">
-              Сделать по плану
+            <button
+              v-if="active.planRunState === 'done'"
+              type="button"
+              class="plan-repeat"
+              :disabled="active.streaming"
+              @click="runPlan"
+            >
+              Повторить
+            </button>
+            <button
+              v-else
+              type="button"
+              class="go"
+              :disabled="active.streaming || active.planRunState === 'running'"
+              @click="runPlan"
+            >
+              {{ active.planRunState === 'running' ? 'Выполняется…' : 'Сделать по плану' }}
             </button>
           </div>
         </section>
 
-        <div class="composer" :class="{ 'drop-up': hasMessages }">
+        <div class="composer drop-up">
           <p v-if="attachError" class="attach-error">{{ attachError }}</p>
           <div v-if="active.attachments.length" class="context-chips">
             <button
@@ -1891,61 +2062,74 @@ function onComposerKey(event: KeyboardEvent) {
             </button>
           </div>
           <textarea
+            ref="composerEl"
             v-model="active.draft"
-            rows="3"
+            rows="1"
             :placeholder="composerPlaceholder"
             :disabled="active.streaming"
+            @input="resizeComposer"
             @keydown="onComposerKey"
           />
           <div class="composer-bar">
             <div class="menus">
-              <button
-                type="button"
-                class="pill"
-                :class="active.mode"
-                @click="modeMenu = !modeMenu; modelMenu = false; historyOpen = false"
-              >
-                <span v-if="active.mode === 'agent'" class="glyph" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="12" height="12">
-                    <circle cx="12" cy="12" r="3.5" fill="currentColor" />
-                    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" />
-                  </svg>
-                </span>
-                <span v-else-if="active.mode === 'plan'" class="glyph" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="12" height="12">
-                    <path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                  </svg>
-                </span>
-                <span v-else class="glyph" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="12" height="12">
-                    <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" />
-                  </svg>
-                </span>
-                {{ modeLabel(active.mode) }}
-                <span class="caret">▾</span>
-              </button>
-              <div v-if="modeMenu" class="menu">
-                <button type="button" @click="setMode('agent')">Агент</button>
-                <button type="button" @click="setMode('plan')">Планирование</button>
-                <button type="button" @click="setMode('chat')">Чат</button>
-              </div>
-              <button type="button" class="model" @click="toggleModelMenu">
-                {{ modelLabel(active) }}
-                <span class="caret">▾</span>
-              </button>
-              <div v-if="modelMenu" class="menu model-menu">
-                <p v-if="modelMenuLoading" class="menu-hint">Загрузка…</p>
-                <p v-else-if="modelMenuError" class="menu-hint">{{ modelMenuError }}</p>
+              <div ref="modeWrap" class="menu-wrap">
                 <button
-                  v-for="option in modelOptions"
-                  :key="`${option.providerId}:${option.model}`"
                   type="button"
-                  :class="{ active: active.providerId === option.providerId && active.model === option.model }"
-                  @click="setModel(option)"
+                  class="pill"
+                  :class="active.mode"
+                  :aria-expanded="modeMenu"
+                  @click="modeMenu = !modeMenu; modelMenu = false; historyOpen = false"
                 >
-                  <span v-if="providers.length > 1" class="menu-provider">{{ option.provider }} · </span>
-                  {{ option.model }}
+                  <span v-if="active.mode === 'agent'" class="glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="12" height="12">
+                      <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+                      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" />
+                    </svg>
+                  </span>
+                  <span v-else-if="active.mode === 'plan'" class="glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="12" height="12">
+                      <path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
+                  </span>
+                  <span v-else class="glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="12" height="12">
+                      <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" />
+                    </svg>
+                  </span>
+                  <span class="pill-label">{{ modeLabel(active.mode) }}</span>
+                  <span class="caret">▾</span>
                 </button>
+                <div v-if="modeMenu" class="menu">
+                  <button type="button" @click="setMode('agent')">Агент</button>
+                  <button type="button" @click="setMode('plan')">План</button>
+                  <button type="button" @click="setMode('chat')">Чат</button>
+                </div>
+              </div>
+              <div ref="modelWrap" class="menu-wrap model-wrap">
+                <button
+                  type="button"
+                  class="model"
+                  :title="modelLabel(active)"
+                  :aria-expanded="modelMenu"
+                  @click="toggleModelMenu"
+                >
+                  <span class="model-label">{{ modelLabel(active) }}</span>
+                  <span class="caret">▾</span>
+                </button>
+                <div v-if="modelMenu" class="menu model-menu">
+                  <p v-if="modelMenuLoading" class="menu-hint">Загрузка…</p>
+                  <p v-else-if="modelMenuError" class="menu-hint">{{ modelMenuError }}</p>
+                  <button
+                    v-for="option in modelOptions"
+                    :key="`${option.providerId}:${option.model}`"
+                    type="button"
+                    :class="{ active: active.providerId === option.providerId && active.model === option.model }"
+                    @click="setModel(option)"
+                  >
+                    <span v-if="providers.length > 1" class="menu-provider">{{ option.provider }} · </span>
+                    {{ option.model }}
+                  </button>
+                </div>
               </div>
             </div>
             <div class="composer-actions">
@@ -1995,7 +2179,7 @@ function onComposerKey(event: KeyboardEvent) {
     </template>
 
     <div v-if="planOpen" class="modal-back" @click.self="planOpen = false">
-      <div class="modal" role="dialog" aria-label="План">
+      <div ref="planModal" class="modal" role="dialog" aria-label="План">
         <header>План</header>
         <textarea v-model="planDraft" class="plan-edit" />
         <footer>
@@ -2144,9 +2328,13 @@ function onComposerKey(event: KeyboardEvent) {
   box-shadow: var(--focus-ring);
 }
 .plus:hover,
-.icon:hover,
+.icon:hover:not(:disabled),
 .tab:hover {
   background: var(--bg-hover);
+}
+.icon:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .icon.on {
   background: var(--bg-3);
@@ -2269,6 +2457,8 @@ function onComposerKey(event: KeyboardEvent) {
 }
 .empty-state {
   flex: 1;
+  align-self: stretch;
+  width: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -2278,6 +2468,7 @@ function onComposerKey(event: KeyboardEvent) {
 }
 .empty-state h3 {
   margin: 0;
+  width: 100%;
   font-family: var(--font-display);
   font-size: 1.05rem;
   letter-spacing: -0.02em;
@@ -2286,12 +2477,14 @@ function onComposerKey(event: KeyboardEvent) {
 }
 .empty-state p {
   margin: 0 0 8px;
+  width: 100%;
   color: var(--fg-3);
   font-size: 0.88rem;
 }
 .empty-state .attach-help {
   margin: 0 0 10px;
-  max-width: 280px;
+  width: 100%;
+  max-width: none;
   font-size: 0.8rem;
   line-height: 1.4;
   color: var(--fg-3);
@@ -2515,28 +2708,64 @@ function onComposerKey(event: KeyboardEvent) {
 }
 .plan-card {
   margin: 0 10px 4px;
+  padding: 10px 12px;
 }
 .plan-card h4 {
-  margin: 2px 0 6px;
-  font-size: 0.95rem;
+  margin: 2px 0 4px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .plan-card p {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--fg-2);
-  font-size: 0.86rem;
-  line-height: 1.4;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .kicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--fg-3);
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+.plan-badge {
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-weight: 650;
+  color: var(--success, #16a34a);
+}
+.plan-badge.running {
+  color: var(--fg-2);
+  font-weight: 500;
 }
 .plan-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+button.plan-repeat {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-1);
+  font-weight: 550;
+  border-radius: 8px;
+  padding: 7px 11px;
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+button.plan-repeat:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 button.text {
   background: transparent;
@@ -2616,6 +2845,8 @@ button.go:disabled {
   color: var(--fg-0);
   padding: 4px 6px;
   min-height: 56px;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
   border-radius: var(--radius-sm);
 }
 .composer textarea:focus-visible {
@@ -2632,21 +2863,36 @@ button.go:disabled {
 .composer-bar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 8px;
-}
-.menus {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   min-width: 0;
+}
+.menus {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.menu-wrap {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  max-width: 42%;
+  min-width: 0;
+}
+.model-wrap {
+  flex: 1 1 auto;
+  max-width: none;
 }
 .pill,
 .model {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
+  max-width: 100%;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg-2);
@@ -2654,6 +2900,15 @@ button.go:disabled {
   padding: 3px 8px;
   cursor: pointer;
   font-size: 0.78rem;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pill-label,
+.model-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .pill.agent {
   color: #93c5fd;
@@ -2663,23 +2918,23 @@ button.go:disabled {
   color: #facc15;
   border-color: color-mix(in srgb, #eab308 55%, var(--border));
 }
-.caret { color: var(--fg-3); }
+.caret {
+  flex-shrink: 0;
+  color: var(--fg-3);
+}
 .menu {
   position: absolute;
-  top: calc(100% + 6px);
   left: 0;
-  z-index: 5;
+  bottom: calc(100% + 6px);
+  z-index: 20;
   min-width: 160px;
+  max-width: min(280px, 70vw);
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
   padding: 4px;
   display: grid;
-}
-.drop-up .menu {
-  top: auto;
-  bottom: calc(100% + 6px);
 }
 .menu button {
   text-align: left;
@@ -2702,13 +2957,15 @@ button.go:disabled {
   color: var(--fg-3);
 }
 .model-menu {
-  left: 120px;
-  min-width: 220px;
+  left: auto;
+  right: 0;
+  min-width: min(220px, 70vw);
   max-height: 280px;
   overflow-y: auto;
 }
 .composer-actions {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
 }

@@ -345,7 +345,8 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'set_column_widths',
-      description: 'Set column widths on the active sheet',
+      description:
+        'Set column widths on the active sheet. width is in pixels (typical 80–220 for readable text/numbers; do not use Excel character widths)',
       parameters: {
         type: 'object',
         properties: {
@@ -357,7 +358,10 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
                 column: {
                   description: 'Column letter (A) or 0-based index',
                 },
-                width: { type: 'number' },
+                width: {
+                  type: 'number',
+                  description: 'Width in pixels (typical 80–220)',
+                },
               },
               required: ['column', 'width'],
             },
@@ -367,7 +371,10 @@ export const OFFICE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
               'Start column letter or 0-based index (with numColumns+width)',
           },
           numColumns: { type: 'number' },
-          width: { type: 'number' },
+          width: {
+            type: 'number',
+            description: 'Width in pixels (typical 80–220)',
+          },
         },
       },
     },

@@ -588,7 +588,8 @@ export const OFFICE_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'set_column_widths',
-      description: 'Set column widths on the active sheet',
+      description:
+        'Set column widths on the active sheet. width is in pixels (typical 80–220 for readable text/numbers; do not use Excel character widths)',
       parameters: {
         type: 'object',
         properties: {
@@ -600,7 +601,10 @@ export const OFFICE_TOOLS = [
                 column: {
                   description: 'Column letter (A) or 0-based index',
                 },
-                width: { type: 'number' },
+                width: {
+                  type: 'number',
+                  description: 'Width in pixels (typical 80–220)',
+                },
               },
               required: ['column', 'width'],
             },
@@ -609,7 +613,10 @@ export const OFFICE_TOOLS = [
             description: 'Start column letter or 0-based index (with numColumns+width)',
           },
           numColumns: { type: 'number' },
-          width: { type: 'number' },
+          width: {
+            type: 'number',
+            description: 'Width in pixels (typical 80–220)',
+          },
         },
       },
     },
@@ -1950,29 +1957,33 @@ export async function runOfficeTool(
           startCol = parsed.col
         }
 
-        const normalized: string[][] = []
+        const cells: Array<{ row: number; col: number; formula: string }> = []
         for (let r = 0; r < numRows; r++) {
           const row = Array.isArray(formulas[r]) ? formulas[r] : []
-          const out: string[] = []
           for (let c = 0; c < numCols; c++) {
             const raw = row[c] == null ? '' : String(row[c]).trim()
-            if (!raw || raw === '=') {
-              return JSON.stringify({
-                error: `empty or invalid formula at row ${r}, col ${c}`,
-              })
-            }
-            out.push(raw.startsWith('=') ? raw : `=${raw}`)
+            if (!raw || raw === '=') continue
+            cells.push({
+              row: startRow + r,
+              col: startCol + c,
+              formula: raw.startsWith('=') ? raw : `=${raw}`,
+            })
           }
-          normalized.push(out)
+        }
+        if (!cells.length) {
+          return JSON.stringify({ error: 'no valid formulas in matrix' })
         }
 
+        for (const cell of cells) {
+          sheet.getRange(cell.row, cell.col, 1, 1).setFormulas([[cell.formula]])
+        }
         const written = a1Range(startRow, startCol, numRows, numCols)
-        sheet.getRange(startRow, startCol, numRows, numCols).setFormulas(normalized)
         return JSON.stringify({
           ok: true,
           sheet: sheet.getSheetName(),
           range: written,
-          cells: numRows * numCols,
+          cells: cells.length,
+          skippedEmpty: numRows * numCols - cells.length,
         })
       } catch (error) {
         return JSON.stringify({
@@ -2061,17 +2072,24 @@ export async function runOfficeTool(
     }
     if (name === 'set_column_widths') {
       try {
+        const normalizePxWidth = (raw: number) => {
+          // Model often sends Excel-like character widths (8–32); Univer expects pixels.
+          let width = raw
+          if (width > 0 && width < 40) width = width * 8
+          return Math.max(40, Math.round(width))
+        }
         const applied: Array<{ column: string; index: number; width: number }> = []
         const widths = args.widths as Array<{ column: string | number; width: number }> | undefined
         if (Array.isArray(widths) && widths.length) {
           for (const item of widths) {
             const index = resolveColumnIndex(item.column)
-            const width = Number(item.width)
-            if (index == null || !Number.isFinite(width) || width <= 0) {
+            const rawWidth = Number(item.width)
+            if (index == null || !Number.isFinite(rawWidth) || rawWidth <= 0) {
               return JSON.stringify({
                 error: `invalid column/width: ${JSON.stringify(item)}`,
               })
             }
+            const width = normalizePxWidth(rawWidth)
             if (typeof sheet.setColumnWidth !== 'function') {
               return JSON.stringify({ error: 'setColumnWidth unavailable' })
             }
@@ -2081,10 +2099,11 @@ export async function runOfficeTool(
         } else if (args.startColumn != null && args.numColumns != null && args.width != null) {
           const start = resolveColumnIndex(args.startColumn as string | number)
           const num = Number(args.numColumns)
-          const width = Number(args.width)
-          if (start == null || !Number.isFinite(num) || num < 1 || !Number.isFinite(width) || width <= 0) {
+          const rawWidth = Number(args.width)
+          if (start == null || !Number.isFinite(num) || num < 1 || !Number.isFinite(rawWidth) || rawWidth <= 0) {
             return JSON.stringify({ error: 'invalid startColumn/numColumns/width' })
           }
+          const width = normalizePxWidth(rawWidth)
           if (typeof sheet.setColumnWidths === 'function') {
             sheet.setColumnWidths(start, num, width)
           } else if (typeof sheet.setColumnWidth === 'function') {

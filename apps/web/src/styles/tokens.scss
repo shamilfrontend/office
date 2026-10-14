@@ -1,0 +1,78 @@
+:root,
+[data-theme='dark'] {
+  /* DeepSeek-like bluish neutrals */
+  --bg-0: #151517;
+  --bg-1: #1b1b1c;
+  --bg-2: #2c2c2e;
+  --bg-3: #353638;
+  --bg-hover: #43454a;
+  --fg-0: #f9fafb;
+  --fg-1: #e9ecf2;
+  --fg-2: #cfd3d6;
+  --fg-3: #979da6;
+  --border: #45464c;
+  --accent: #5686fe;
+  --accent-hover: #7aaaff;
+  --danger: #f25a5a;
+  --success: #22c55e;
+  --radius: 10px;
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  --chat-width: 420px;
+  --font-display: 'Outfit', system-ui, sans-serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  /* Soft cool slate + DeepSeek blue */
+  --bg-0: #eef1f4;
+  --bg-1: #ffffff;
+  --bg-2: #f5f6f7;
+  --bg-3: #e9ecf2;
+  --bg-hover: #e1e5ee;
+  --fg-0: #0f1115;
+  --fg-1: #334155;
+  --fg-2: #475569;
+  --fg-3: #64748b;
+  --border: #e5e7eb;
+  --accent: #4d6bfe;
+  --accent-hover: #4176e6;
+  --danger: #ec1313;
+  --success: #16a34a;
+  --radius: 10px;
+  --shadow: 0 10px 40px rgba(15, 17, 21, 0.08);
+  --chat-width: 420px;
+  --font-display: 'Outfit', system-ui, sans-serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+:root {
+  font-family: var(--font-body);
+  color: var(--fg-1);
+  background: var(--bg-0);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+  background: var(--bg-0);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: var(--accent);
+}

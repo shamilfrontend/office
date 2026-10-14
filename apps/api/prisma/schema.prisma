@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String             @id @default(cuid())
+  yandexId          String             @unique
+  email             String?
+  displayName       String?
+  avatarUrl         String?
+  storagePath       String
+  onboardingSkipped Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  documents         Document[]
+  aiProviders       AiProviderConfig[]
+  chats             Chat[]
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  type         String
+  relativePath String
+  size         Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Chat {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String    @default("Новый чат")
+  mode         String    @default("agent")
+  providerId   String?
+  model        String?
+  documentId   String?
+  planTitle    String?
+  planMarkdown String?
+  pinnedOpen   Boolean   @default(true)
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  messages     Message[]
+
+  @@index([userId, pinnedOpen])
+}
+
+model Message {
+  id            String   @id @default(cuid())
+  chatId        String
+  chat          Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role          String
+  content       String
+  toolName      String?
+  toolCallId    String?
+  toolStatus    String?
+  toolCallsJson String?
+  createdAt     DateTime @default(now())
+
+  @@index([chatId])
+}
+
+model AiProviderConfig {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String
+  baseUrl         String
+  encryptedApiKey String?
+  model           String?
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { FlatCompat } from '@eslint/eslintrc';
 import eslint from '@eslint/js';
+import { defineConfig } from 'eslint/config';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import pluginVue from 'eslint-plugin-vue';
@@ -21,8 +22,7 @@ const compat = new FlatCompat({
 
 const airbnbBase = compat.extends('airbnb-base');
 
-/** @type {import('eslint').Linter.Config[]} */
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: [
       '**/dist/**',
@@ -130,6 +130,12 @@ export default tseslint.config(
         },
         tsconfigRootDir: path.join(__dirname, 'packages/shared'),
       },
+    },
+  },
+  {
+    files: ['packages/shared/scripts/**/*.{mjs,js}'],
+    rules: {
+      'no-console': 'off',
     },
   },
   {

@@ -1,3 +1,4 @@
+import { systemPromptForMode } from '@office/shared';
 import { toolsForMode, type ChatMode } from '@/univer/officeTools';
 import {
   MESSAGE_FRAMING_TOKENS,
@@ -8,9 +9,9 @@ import {
 } from './estimateTokens';
 import { effectiveReservedTokens, getModelContextInfo } from './modelContext';
 
-export type ContextUsageCategoryId = 'system' | 'tools' | 'conversation';
+type ContextUsageCategoryId = 'system' | 'tools' | 'conversation';
 
-export type ContextUsageCategory = {
+type ContextUsageCategory = {
   id: ContextUsageCategoryId;
   label: string;
   tokens: number;
@@ -35,17 +36,6 @@ const CONTEXT_USAGE_META: Record<
   tools: { label: 'Определения инструментов', color: '#C4B5FD' },
   conversation: { label: 'Диалог', color: '#FB923C' },
 };
-
-/** Зеркало system prompt из apps/api/src/ai/ai.service.ts */
-export function systemPromptForMode(mode: ChatMode): string {
-  if (mode === 'plan') {
-    return 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим План: только читай документ через tools и создавай план (create_plan/update_plan). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection или контекст выделения. Для таблиц сначала read_range/read_formulas/get_selection; другой лист — activate_sheet.';
-  }
-  if (mode === 'agent') {
-    return 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Агент: можешь читать и изменять документ через tools. Если пользователь говорит «здесь/это/выделенное», опирайся на selection / get_selection. Для таблиц: другие листы — сначала activate_sheet; insert_sheet/rename_sheet/delete_sheet/set_freeze для структуры; set_cells — литералы; set_formulas — формулы (EN-имена, аргументы через запятую, ведущий =, напр. =SUM(A1:A10)); read_formulas читает формулы и значения; для оформления — format_range, set_column_widths, set_number_format, set_borders, set_row_heights; add_conditional_highlight/get_conditional_formatting/clear_conditional_formatting — условное форматирование (в т.ч. text_contains/duplicate); set_list_validation/set_number_validation/get_data_validations/clear_data_validation — валидация списка или числа; для объединения — merge_range; sort_range — сортировка (by.column: 0-based внутри диапазона; буква колонки → относительный индекс); create_filter/set_column_filter/remove_filter/get_filter — автофильтр (set_column_filter.column: буква или абсолютный 0-based индекс листа); search_in_sheet / replace_in_sheet — поиск и замена литералов (формулы не трогает); сначала read_range/read_formulas/get_selection. Для документов: get_doc_outline/search_in_document; структура — insert_paragraph, set_heading, set_list; format_text по выделению или paragraphIndex. После серии tools дай краткий итог.';
-  }
-  return 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Чат: читай открытый документ через tools (сначала get_workbook_outline/get_doc_outline или get_selection, затем read_range / read_formulas / read_document / search_in_document; для другого листа — activate_sheet). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection. Если tools доступны, не говори, что нет доступа к файлу — сначала прочитай его. Предлагай правки текстом.';
-}
 
 function wireMessageTokens(msg: Record<string, unknown>): number {
   let tokens = 0;

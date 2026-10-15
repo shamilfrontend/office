@@ -1108,7 +1108,7 @@ async function runPlan() {
 }
 
 function goSettings() {
-  void router.push('/home');
+  void router.push({ name: 'home' });
   auth.openSettings();
 }
 
@@ -3000,15 +3000,12 @@ watch(
   font-size: 0.75rem;
   color: var(--fg-3);
 }
-.approve,
-.plan-card {
+.approve {
+  margin-top: 4px;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
   background: var(--bg-2);
-}
-.approve {
-  margin-top: 4px;
 }
 .approve p {
   margin: 0 0 6px;
@@ -3037,7 +3034,10 @@ watch(
 }
 .plan-card {
   margin: 0 10px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 10px 12px;
+  background: var(--bg-2);
 }
 .plan-card h4 {
   margin: 2px 0 4px;

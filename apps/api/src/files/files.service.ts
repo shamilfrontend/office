@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserStorageService } from '../storage/user-storage.service';
 import type { MulterFile } from '../types/uploaded-file';
 import { decodeUploadFilename } from './decode-filename';
+import type { DocType } from '@office/shared';
 import {
   docToDocx,
   docxToDoc,
@@ -19,7 +20,7 @@ import {
   xlsxToSheet,
 } from './office-convert';
 
-export type DocType = 'SHEET' | 'DOC';
+export type { DocType };
 export type DownloadFormat = 'json' | 'csv' | 'xlsx' | 'docx';
 
 @Injectable()

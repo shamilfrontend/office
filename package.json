@@ -12,9 +12,9 @@
     "build:api": "npm run build:shared && npm run build --prefix apps/api",
     "db:migrate": "npm run prisma:migrate --prefix apps/api",
     "db:generate": "npm run prisma:generate --prefix apps/api",
-    "lint": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\"",
-    "lint:fix": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\" --fix",
-    "format": "prettier --write \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue,css,scss}\" \"packages/shared/src/**/*.{ts,js}\""
+    "lint": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\" \"packages/shared/scripts/**/*.{mjs,js}\"",
+    "lint:fix": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\" \"packages/shared/scripts/**/*.{mjs,js}\" --fix",
+    "format": "prettier --write \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue,css,scss}\" \"packages/shared/src/**/*.{ts,js}\" \"packages/shared/scripts/**/*.{mjs,js}\""
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

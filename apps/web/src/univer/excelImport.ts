@@ -1,12 +1,12 @@
 import LuckyExcel from '@mertdeveci55/univer-import-export';
 
-export type WorkbookSnapshot = Record<string, unknown>;
+type WorkbookSnapshot = Record<string, unknown>;
 
 function baseName(filename: string) {
   return filename.replace(/\.[^.]+$/, '') || filename;
 }
 
-export function isSheetSpreadsheet(file: File) {
+function isSheetSpreadsheet(file: File) {
   const lower = file.name.toLowerCase();
   return (
     lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv')

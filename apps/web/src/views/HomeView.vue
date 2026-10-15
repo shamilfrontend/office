@@ -74,7 +74,7 @@ onMounted(async () => {
 
 async function openDoc(doc: Pick<DocItem, 'id' | 'name' | 'type'>) {
   fileTabs.open(doc);
-  await router.push(`/edit/${doc.id}`);
+  await router.push({ name: 'edit', params: { id: doc.id } });
 }
 
 async function create(type: 'SHEET' | 'DOC') {
@@ -211,7 +211,7 @@ async function logout() {
   });
   if (!ok) return;
   await auth.logout();
-  await router.push('/');
+  await router.push({ name: 'landing' });
 }
 </script>
 

@@ -82,8 +82,8 @@ async function load(id: string) {
     if (seq !== loadSeq) return;
     console.error(e);
     const next = fileTabs.close(id);
-    if (next) await router.replace(`/edit/${next}`);
-    else await router.replace('/home');
+    if (next) await router.replace({ name: 'edit', params: { id: next } });
+    else await router.replace({ name: 'home' });
   }
 }
 
@@ -222,7 +222,7 @@ async function switchTab(id: string) {
   if (id === docId.value) return;
   await flushSave();
   fileTabs.focus(id);
-  await router.push(`/edit/${id}`);
+  await router.push({ name: 'edit', params: { id } });
 }
 
 async function closeTab(id: string, e?: Event) {
@@ -230,11 +230,11 @@ async function closeTab(id: string, e?: Event) {
   if (id === docId.value) await flushSave();
   const next = fileTabs.close(id);
   if (!next) {
-    await router.push('/home');
+    await router.push({ name: 'home' });
     return;
   }
   if (id === docId.value) {
-    await router.push(`/edit/${next}`);
+    await router.push({ name: 'edit', params: { id: next } });
   }
 }
 
@@ -254,7 +254,7 @@ async function createAndOpen(type: 'SHEET' | 'DOC') {
     await flushSave();
     const doc = await api.createFile(type);
     fileTabs.open(doc);
-    await router.push(`/edit/${doc.id}`);
+    await router.push({ name: 'edit', params: { id: doc.id } });
   } catch (e) {
     console.error(e);
     alert(e instanceof Error ? e.message : 'Не удалось создать файл');
@@ -265,7 +265,7 @@ async function createAndOpen(type: 'SHEET' | 'DOC') {
 
 async function openFromFiles() {
   newMenuOpen.value = false;
-  await router.push('/home');
+  await router.push({ name: 'home' });
 }
 
 onBeforeRouteLeave(async (to) => {
@@ -290,7 +290,11 @@ watch(
 <template>
   <div class="editor-page">
     <header class="top">
-      <button type="button" class="brand-btn" @click="router.push('/home')">
+      <button
+        type="button"
+        class="brand-btn"
+        @click="router.push({ name: 'home' })"
+      >
         <AppLogo :size="28" />
       </button>
       <input

@@ -166,7 +166,7 @@ async function logout() {
   if (!ok) return;
   auth.closeSettings();
   await auth.logout();
-  await router.push('/');
+  await router.push({ name: 'landing' });
 }
 </script>
 

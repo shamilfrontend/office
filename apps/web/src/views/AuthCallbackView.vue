@@ -15,7 +15,7 @@ onMounted(async () => {
   } else {
     auth.openOnboardingIfNeeded();
   }
-  await router.replace('/home');
+  await router.replace({ name: 'home' });
 });
 </script>
 

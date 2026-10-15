@@ -10,7 +10,7 @@ export type AiPermissionCategoryMeta = {
 
 const STORAGE_KEY = 'office_ai_tool_permissions';
 
-export const AI_PERMISSION_CATEGORIES: AiPermissionCategoryMeta[] = [
+const AI_PERMISSION_CATEGORIES: AiPermissionCategoryMeta[] = [
   { id: 'sheetData', label: 'Данные в таблице' },
   { id: 'sheetFormat', label: 'Форматирование таблицы' },
   { id: 'sheetStructure', label: 'Структура листов' },
@@ -103,7 +103,7 @@ export function isToolAutoAllowed(name: string): boolean {
   return permissions[category];
 }
 
-export function setCategoryAllowed(
+function setCategoryAllowed(
   category: AiPermissionCategory,
   enabled: boolean,
 ) {

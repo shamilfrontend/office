@@ -7,9 +7,9 @@ import {
   toolsForMode,
 } from './office-tools.catalog';
 
-export const MAX_MESSAGES = 80;
-export const MAX_CONTENT_CHARS = 32_000;
-export const MAX_TOTAL_CHARS = 200_000;
+const MAX_MESSAGES = 80;
+const MAX_CONTENT_CHARS = 32_000;
+const MAX_TOTAL_CHARS = 200_000;
 const MAX_ARGS_CHARS = 8_000;
 
 const MODES = new Set<ChatMode>(['chat', 'plan', 'agent']);

@@ -60,3 +60,42 @@ export function planAllTodosDone(plan: Plan | null | undefined): boolean {
     (t) => t.status === 'done' || t.status === 'completed',
   );
 }
+
+export function normalizePlanStatus(status: string): string {
+  const s = status.trim().toLowerCase();
+  if (s === 'done' || s === 'complete' || s === 'completed' || s === 'x') {
+    return 'completed';
+  }
+  if (s === 'pending' || s === 'todo' || s === 'open' || s === '')
+    return 'pending';
+  if (s === 'in_progress' || s === 'doing' || s === 'active')
+    return 'in_progress';
+  if (s === 'cancelled' || s === 'canceled' || s === 'skipped')
+    return 'cancelled';
+  return s;
+}
+
+/** Pure merge used by update_plan (id match, else index). */
+export function mergePlanTodos(
+  plan: Plan,
+  todos: Array<{ id?: string; content?: string; status?: string }>,
+): Plan {
+  return {
+    ...plan,
+    todos: plan.todos.map((t, i) => {
+      const byId = todos.find(
+        (x) => x.id != null && String(x.id) === String(t.id),
+      );
+      const byIndex = byId ? undefined : todos[i];
+      const u = byId ?? byIndex;
+      if (!u) return t;
+      return {
+        ...t,
+        ...(u.content != null ? { content: String(u.content) } : {}),
+        ...(u.status != null
+          ? { status: normalizePlanStatus(String(u.status)) }
+          : {}),
+      };
+    }),
+  };
+}

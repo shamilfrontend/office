@@ -15,10 +15,6 @@ export class UserStorageService implements OnModuleInit {
     await fs.mkdir(this.dataRoot, { recursive: true });
   }
 
-  getDataRoot() {
-    return this.dataRoot;
-  }
-
   userRoot(userId: string) {
     return path.join(this.dataRoot, 'users', userId);
   }

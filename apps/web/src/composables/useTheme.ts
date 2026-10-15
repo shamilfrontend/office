@@ -43,7 +43,7 @@ export function initTheme() {
   listening = true;
 }
 
-export function setTheme(pref: ThemePreference) {
+function setTheme(pref: ThemePreference) {
   preference.value = pref;
   try {
     localStorage.setItem(STORAGE_KEY, pref);

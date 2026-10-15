@@ -158,7 +158,7 @@ export const api = {
   },
 };
 
-export type ChatMessageRecord = {
+type ChatMessageRecord = {
   id: string;
   role: string;
   content: string;

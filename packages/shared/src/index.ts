@@ -5,10 +5,11 @@ export {
   toolsForMode,
   type ChatMode,
   type DocType,
-  type OfficeToolDef,
 } from './office-tools';
 
 export {
+  mergePlanTodos,
+  normalizePlanStatus,
   parsePlanMarkdown,
   planAllTodosDone,
   planToMarkdown,
@@ -21,8 +22,6 @@ export {
   collectFormulaCells,
   colLettersToIndex,
   indexToColLetters,
-  mergePlanTodos,
-  normalizePlanStatus,
-  type PlanState,
-  type PlanToolTodo,
 } from './a1';
+
+export { systemPromptForMode } from './system-prompts';

@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import type { DocItem } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 
-export type FileTab = {
+type FileTab = {
   id: string;
   name: string;
   type: 'SHEET' | 'DOC';
@@ -140,7 +140,6 @@ export const useFileTabsStore = defineStore('fileTabs', () => {
 
   return {
     tabs,
-    activeId,
     hydrateFromSession,
     open,
     focus,
@@ -148,6 +147,5 @@ export const useFileTabsStore = defineStore('fileTabs', () => {
     rename,
     syncActive,
     remove,
-    persist,
   };
 });

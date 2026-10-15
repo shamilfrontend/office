@@ -1,3 +1,4 @@
+import { colLettersToIndex, indexToColLetters } from '@office/shared';
 import { DocSelectionManagerService } from '@univerjs/docs';
 import type { UniverApi, UniverDocument } from './useUniver';
 
@@ -233,25 +234,6 @@ export function parseA1Cell(a1: string): { row: number; col: number } | null {
   return { col: colLettersToIndex(m[1]), row: Number(m[2]) - 1 };
 }
 
-export function colLettersToIndex(col: string): number {
-  const letters = col.toUpperCase().split('');
-  const invalid = letters.some((ch) => ch < 'A' || ch > 'Z');
-  if (invalid) return -1;
-  const n = letters.reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
-  return n - 1;
-}
-
-export function indexToColLetters(col: number): string {
-  let n = col + 1;
-  let s = '';
-  while (n > 0) {
-    const r = (n - 1) % 26;
-    s = String.fromCharCode(65 + r) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s;
-}
-
 export function a1FromRowCol(row: number, col: number): string {
   return `${indexToColLetters(col)}${row + 1}`;
 }
@@ -299,7 +281,7 @@ export function getActiveWorkbook(api: UniverApi | null): SheetApi | null {
   return (api.getActiveWorkbook() as unknown as SheetApi | null) ?? null;
 }
 
-export function getSheetSelection(
+function getSheetSelection(
   api: UniverApi | null,
 ): SheetSelectionInfo | null {
   const wb = getActiveWorkbook(api);

@@ -1,4 +1,4 @@
-export type ModelContextInfo = {
+type ModelContextInfo = {
   contextWindow: number;
   reservedOutputTokenSpace: number;
 };

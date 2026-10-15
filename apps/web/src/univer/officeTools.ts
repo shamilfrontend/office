@@ -15,6 +15,7 @@ import {
 import {
   adjustFormulaRefs,
   collectFormulaCells,
+  indexToColLetters,
   mergePlanTodos,
   normalizePlanStatus,
   WRITE_TOOL_NAMES,
@@ -28,7 +29,6 @@ import {
   getDocSelection,
   getSelectionInfo,
   getSelectionInjector,
-  indexToColLetters,
   parseA1Cell,
   resolveColumnIndex,
   type CfRuleLike,
@@ -40,7 +40,7 @@ import {
 } from './selection';
 import type { DocParagraph, UniverApi, UniverDocument } from './useUniver';
 
-export { OFFICE_TOOLS, WRITE_TOOL_NAMES, toolsForMode } from '@office/shared';
+export { toolsForMode } from '@office/shared';
 export type { ChatMode } from '@office/shared';
 
 const READ_MAX_ROWS = 80;

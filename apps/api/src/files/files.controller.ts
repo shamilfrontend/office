@@ -19,7 +19,8 @@ import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { MulterFile } from '../types/uploaded-file';
-import { DocType, FilesService } from './files.service';
+import type { DocType } from '@office/shared';
+import { FilesService } from './files.service';
 import type { DownloadFormat } from './files.service';
 
 @Controller('files')
@@ -60,7 +61,8 @@ export class FilesController {
     @Res() res: Response,
   ) {
     const allowed: DownloadFormat[] = ['json', 'csv', 'xlsx', 'docx'];
-    const fmt = allowed.includes(format) ? format : 'json';
+    const fmt =
+      format && allowed.includes(format) ? format : ('json' as DownloadFormat);
     const file = await this.files.download(user.id, id, fmt);
     res.setHeader('Content-Type', file.contentType);
     res.setHeader(

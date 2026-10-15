@@ -33,7 +33,6 @@ export default defineConfig({
       'react-dom',
       'rxjs',
       '@mertdeveci55/univer-import-export',
-      'xlsx',
     ],
   },
 })

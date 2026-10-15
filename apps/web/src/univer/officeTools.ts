@@ -15,6 +15,7 @@ import {
 import {
   a1FromRowCol,
   a1Range,
+  colLettersToIndex,
   estimateA1Area,
   getActiveWorkbook,
   getDocActiveOffsets,
@@ -31,7 +32,23 @@ import {
 } from './selection'
 import type { DocParagraph, UniverApi, UniverDocument } from './useUniver'
 
-export type ChatMode = 'chat' | 'plan' | 'agent'
+import { WRITE_TOOL_NAMES } from '@office/shared'
+
+export {
+  OFFICE_TOOLS,
+  WRITE_TOOL_NAMES,
+  toolsForMode,
+  type ChatMode,
+} from '@office/shared'
+
+function normalizePlanStatus(status: string): string {
+  const s = status.trim().toLowerCase()
+  if (s === 'done' || s === 'complete' || s === 'completed' || s === 'x') return 'completed'
+  if (s === 'pending' || s === 'todo' || s === 'open' || s === '') return 'pending'
+  if (s === 'in_progress' || s === 'doing' || s === 'active') return 'in_progress'
+  if (s === 'cancelled' || s === 'canceled' || s === 'skipped') return 'cancelled'
+  return s
+}
 
 const READ_MAX_ROWS = 80
 const READ_MAX_COLS = 40
@@ -41,34 +58,6 @@ const DATA_APPROVE_CELLS = 20
 const FORMAT_APPROVE_CELLS = 50
 const LAYOUT_APPROVE_COUNT = 5
 const DOC_APPROVE_CHARS = 200
-
-const WRITE_TOOL_NAMES = new Set([
-  'set_cells',
-  'set_formulas',
-  'clear_range',
-  'format_range',
-  'set_column_widths',
-  'set_number_format',
-  'merge_range',
-  'set_borders',
-  'set_row_heights',
-  'insert_sheet',
-  'rename_sheet',
-  'delete_sheet',
-  'set_freeze',
-  'sort_range',
-  'create_filter',
-  'remove_filter',
-  'set_column_filter',
-  'replace_in_sheet',
-  'replace_text',
-  'replace_selection',
-  'insert_text',
-  'insert_paragraph',
-  'set_heading',
-  'set_list',
-  'format_text',
-])
 
 export type ImpactSummary = { title: string; detail: string }
 
@@ -117,6 +106,11 @@ export function needsApprove(
   if (name === 'set_formulas') {
     return gridCellCount(args.formulas as unknown[][] | undefined) > DATA_APPROVE_CELLS
   }
+  if (name === 'copy_formulas') {
+    const times = Math.max(1, Number(args.times) || 1)
+    return times > 3 || estimateA1Area(String(args.source || '')) * times > DATA_APPROVE_CELLS
+  }
+  if (name === 'insert_image') return true
   if (
     name === 'format_range' ||
     name === 'set_number_format' ||
@@ -169,6 +163,19 @@ export function describeImpact(
     const cells = gridCellCount(args.formulas as unknown[][] | undefined)
     const start = args.start != null ? String(args.start) : 'активная ячейка'
     return { title, detail: `~${cells} формул от ${start}` }
+  }
+  if (name === 'copy_formulas') {
+    const times = Math.max(1, Number(args.times) || 1)
+    return {
+      title,
+      detail: `${String(args.source || '?')} → ${String(args.destination || '?')} ×${times}`,
+    }
+  }
+  if (name === 'insert_image') {
+    return {
+      title,
+      detail: String(args.start || 'A1'),
+    }
   }
   if (
     name === 'clear_range' ||
@@ -272,746 +279,21 @@ export function describeImpact(
   return { title, detail: '' }
 }
 
-export const OFFICE_TOOLS = [
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_workbook_outline',
-      description: 'Get sheet names and rough size of the active workbook',
-      parameters: { type: 'object', properties: {} },
+/** Shift relative A1 refs in a formula by dRow/dCol (absolute $ refs stay put). */
+function adjustFormulaRefs(formula: string, dRow: number, dCol: number): string {
+  if (!dRow && !dCol) return formula
+  return formula.replace(
+    /(^|[^A-Za-z0-9_])(\$?)([A-Za-z]+)(\$?)(\d+)\b/g,
+    (full, prefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
+      let c = colLettersToIndex(col)
+      let r = Number(row) - 1
+      if (!Number.isFinite(c) || c < 0 || !Number.isFinite(r) || r < 0) return full
+      if (!colAbs) c += dCol
+      if (!rowAbs) r += dRow
+      if (c < 0 || r < 0) return full
+      return `${prefix}${colAbs}${indexToColLetters(c)}${rowAbs}${r + 1}`
     },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_selection',
-      description:
-        'Get current selection: sheet range/cell + preview, or document text offsets/text',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'read_range',
-      description:
-        'Read cell values from A1 range on active sheet. If range omitted, uses active selection.',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', description: 'A1 notation, e.g. A1:C10. Optional: active selection.' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'search_in_sheet',
-      description: 'Search text in used range of the active sheet; returns A1 hits',
-      parameters: {
-        type: 'object',
-        properties: { query: { type: 'string' } },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'replace_in_sheet',
-      description:
-        'Replace substring in literal cell values on the active sheet (case-insensitive). Skips formula cells. Caps at 50 cells.',
-      parameters: {
-        type: 'object',
-        properties: {
-          search: { type: 'string', description: 'Substring to find' },
-          replacement: {
-            type: 'string',
-            description: 'Replacement text (empty string allowed)',
-          },
-          range: {
-            type: 'string',
-            description: 'A1 range; optional → used data range',
-          },
-        },
-        required: ['search', 'replacement'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'activate_sheet',
-      description: 'Activate a sheet by name so subsequent tools operate on it',
-      parameters: {
-        type: 'object',
-        properties: { name: { type: 'string' } },
-        required: ['name'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'insert_sheet',
-      description: 'Insert a new sheet (becomes active). Optional name and 0-based index.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          index: { type: 'number', description: '0-based position' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'rename_sheet',
-      description: 'Rename a sheet. If name omitted, renames the active sheet.',
-      parameters: {
-        type: 'object',
-        properties: {
-          newName: { type: 'string' },
-          name: { type: 'string', description: 'Current sheet name; optional → active' },
-        },
-        required: ['newName'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'delete_sheet',
-      description: 'Delete a sheet by name. If name omitted, deletes the active sheet.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Sheet name; optional → active' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_freeze',
-      description:
-        'Freeze first N rows and/or columns on the active sheet, or clear freeze',
-      parameters: {
-        type: 'object',
-        properties: {
-          rows: { type: 'number', description: 'Number of frozen rows from top' },
-          columns: { type: 'number', description: 'Number of frozen columns from left' },
-          clear: { type: 'boolean', description: 'If true, cancel freeze' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_filter',
-      description: 'Get active auto-filter on the sheet: range, criteria, filtered-out rows',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'sort_range',
-      description:
-        'Sort an A1 range (or active selection). by.column is 0-based index within the range (or letter converted relative to range start).',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: {
-            type: 'string',
-            description: 'A1 range; optional → active selection',
-          },
-          by: {
-            description:
-              'Column index within range, or {column, ascending?}, or array of those',
-          },
-        },
-        required: ['by'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'create_filter',
-      description:
-        'Create auto-filter on a range (or selection). If a filter exists and replace=true, replaces it.',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: {
-            type: 'string',
-            description: 'A1 range; optional → active selection',
-          },
-          replace: {
-            type: 'boolean',
-            description: 'Default true: remove existing filter first if needed',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'remove_filter',
-      description: 'Remove the active auto-filter on the sheet',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_column_filter',
-      description:
-        'Set or clear filter criteria on a sheet column (letter or 0-based absolute index). Requires create_filter first.',
-      parameters: {
-        type: 'object',
-        properties: {
-          column: {
-            description: 'Column letter (A) or 0-based sheet index',
-          },
-          values: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Visible values for the filter',
-          },
-          clear: {
-            type: 'boolean',
-            description: 'If true, remove criteria for this column',
-          },
-        },
-        required: ['column'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'read_formulas',
-      description:
-        'Read formula strings and calculated values from A1 range (or active selection). Prefer this over read_range when you need formulas.',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: {
-            type: 'string',
-            description: 'A1 notation, e.g. A1:C10. Optional: active selection.',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_cells',
-      description:
-        'Write a 2D values grid starting at start (A1). If start omitted, uses active cell. Writes the full grid size. Use for literals only; for formulas use set_formulas.',
-      parameters: {
-        type: 'object',
-        properties: {
-          start: { type: 'string', description: 'A1 start cell; optional → active cell' },
-          values: {
-            type: 'array',
-            items: { type: 'array', items: {} },
-          },
-        },
-        required: ['values'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_formulas',
-      description:
-        'Write a 2D grid of spreadsheet formulas starting at start (A1). English function names, comma args, leading = (e.g. =SUM(A1:A10)).',
-      parameters: {
-        type: 'object',
-        properties: {
-          start: { type: 'string', description: 'A1 start cell; optional → active cell' },
-          formulas: {
-            type: 'array',
-            items: { type: 'array', items: { type: 'string' } },
-          },
-        },
-        required: ['formulas'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'clear_range',
-      description: 'Clear values in A1 range',
-      parameters: {
-        type: 'object',
-        properties: { range: { type: 'string' } },
-        required: ['range'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'format_range',
-      description:
-        'Apply cell styles to an A1 range (or active selection): bold, font size/color, background, align, wrap',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', description: 'A1 range; optional → active selection' },
-          bold: { type: 'boolean' },
-          fontSize: { type: 'number' },
-          fontColor: { type: 'string' },
-          backgroundColor: { type: 'string' },
-          horizontalAlign: {
-            type: 'string',
-            enum: ['left', 'center', 'right'],
-          },
-          wrap: { type: 'boolean' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_column_widths',
-      description:
-        'Set column widths on the active sheet. width is in pixels (typical 80–220 for readable text/numbers; do not use Excel character widths)',
-      parameters: {
-        type: 'object',
-        properties: {
-          widths: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                column: {
-                  description: 'Column letter (A) or 0-based index',
-                },
-                width: {
-                  type: 'number',
-                  description: 'Width in pixels (typical 80–220)',
-                },
-              },
-              required: ['column', 'width'],
-            },
-          },
-          startColumn: {
-            description: 'Start column letter or 0-based index (with numColumns+width)',
-          },
-          numColumns: { type: 'number' },
-          width: {
-            type: 'number',
-            description: 'Width in pixels (typical 80–220)',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_number_format',
-      description: 'Set number format pattern on a range (or active selection)',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', description: 'A1 range; optional → active selection' },
-          pattern: {
-            type: 'string',
-            description: 'e.g. #,##0.00 or 0%',
-          },
-        },
-        required: ['pattern'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'merge_range',
-      description:
-        'Merge or unmerge cells in a range (or active selection). Modes: merge, across, vertically, unmerge',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', description: 'A1 range; optional → active selection' },
-          mode: {
-            type: 'string',
-            enum: ['merge', 'across', 'vertically', 'unmerge'],
-            description: 'Default merge',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_borders',
-      description: 'Set borders on a range (or active selection)',
-      parameters: {
-        type: 'object',
-        properties: {
-          range: { type: 'string', description: 'A1 range; optional → active selection' },
-          type: {
-            type: 'string',
-            enum: [
-              'all',
-              'outside',
-              'inside',
-              'top',
-              'bottom',
-              'left',
-              'right',
-              'horizontal',
-              'vertical',
-              'none',
-            ],
-          },
-          style: {
-            type: 'string',
-            enum: ['thin', 'medium', 'thick', 'dashed', 'dotted', 'double', 'none'],
-            description: 'Default thin',
-          },
-          color: { type: 'string', description: 'Hex color, default #000000' },
-        },
-        required: ['type'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_row_heights',
-      description: 'Set row heights on the active sheet (rows are 1-based)',
-      parameters: {
-        type: 'object',
-        properties: {
-          heights: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                row: { type: 'number', description: '1-based row number' },
-                height: { type: 'number' },
-              },
-              required: ['row', 'height'],
-            },
-          },
-          startRow: { type: 'number', description: '1-based start row' },
-          numRows: { type: 'number' },
-          height: { type: 'number' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'get_doc_outline',
-      description:
-        'Get document outline: headings preferred, else first paragraphs with style/list flags and offsets',
-      parameters: {
-        type: 'object',
-        properties: {
-          maxItems: { type: 'number', description: 'Default 80' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'read_document',
-      description: 'Read document body stream window (truncated)',
-      parameters: {
-        type: 'object',
-        properties: {
-          maxChars: { type: 'number' },
-          startOffset: { type: 'number', description: 'Start offset in dataStream' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'search_in_document',
-      description: 'Search text in document paragraphs; returns offset hits',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string' },
-          matchCase: { type: 'boolean' },
-          maxHits: { type: 'number' },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'replace_text',
-      description: 'Replace all occurrences of search with replacement in document body stream',
-      parameters: {
-        type: 'object',
-        properties: {
-          search: { type: 'string' },
-          replacement: { type: 'string' },
-        },
-        required: ['search', 'replacement'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'replace_selection',
-      description: 'Replace currently selected document text only',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string', description: 'Replacement text' },
-        },
-        required: ['text'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'insert_text',
-      description:
-        'Insert text into the document. at=end appends; at=selection inserts at cursor or replaces non-empty selection.',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string' },
-          at: {
-            type: 'string',
-            enum: ['end', 'selection'],
-            description: 'Default end',
-          },
-        },
-        required: ['text'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'insert_paragraph',
-      description: 'Insert or append a paragraph. index = 0-based position; omit to append.',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string' },
-          index: { type: 'number', description: '0-based paragraph index' },
-        },
-        required: ['text'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_heading',
-      description:
-        'Set paragraph named style (heading/title). paragraphIndex optional → paragraph containing selection.',
-      parameters: {
-        type: 'object',
-        properties: {
-          style: {
-            type: 'string',
-            enum: ['normal', 'title', 'subtitle', 'h1', 'h2', 'h3', 'h4', 'h5'],
-          },
-          paragraphIndex: { type: 'number' },
-        },
-        required: ['style'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'set_list',
-      description:
-        'Apply or remove list on a paragraph. paragraphIndex optional → selection paragraph.',
-      parameters: {
-        type: 'object',
-        properties: {
-          type: {
-            type: 'string',
-            enum: ['bullet', 'ordered', 'check', 'none'],
-          },
-          paragraphIndex: { type: 'number' },
-        },
-        required: ['type'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'format_text',
-      description:
-        'Apply text styles to selection or paragraph (bold, italic, underline, fontSize, color)',
-      parameters: {
-        type: 'object',
-        properties: {
-          bold: { type: 'boolean' },
-          italic: { type: 'boolean' },
-          underline: { type: 'boolean' },
-          fontSize: { type: 'number', description: 'Font size in points' },
-          color: { type: 'string', description: 'Hex color e.g. #333333' },
-          paragraphIndex: {
-            type: 'number',
-            description: 'If no selection, format whole paragraph',
-          },
-          at: {
-            type: 'string',
-            enum: ['selection'],
-            description: 'Prefer selection when present',
-          },
-        },
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'create_plan',
-      description: 'Create an execution plan for the user to review',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          overview: { type: 'string' },
-          todos: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                content: { type: 'string' },
-              },
-              required: ['id', 'content'],
-            },
-          },
-        },
-        required: ['name', 'overview', 'todos'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'update_plan',
-      description: 'Update plan todos progress',
-      parameters: {
-        type: 'object',
-        properties: {
-          todos: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                content: { type: 'string' },
-                status: { type: 'string' },
-              },
-              required: ['id'],
-            },
-          },
-        },
-        required: ['todos'],
-      },
-    },
-  },
-]
-
-export function toolsForMode(
-  mode: ChatMode,
-  buildingPlan = false,
-  hasDocument = true,
-  docType: 'SHEET' | 'DOC' = 'SHEET',
-) {
-  const read =
-    hasDocument && docType === 'SHEET'
-      ? [
-          'get_workbook_outline',
-          'get_selection',
-          'read_range',
-          'read_formulas',
-          'search_in_sheet',
-          'activate_sheet',
-          'get_filter',
-        ]
-      : hasDocument && docType === 'DOC'
-        ? [
-            'get_doc_outline',
-            'get_selection',
-            'read_document',
-            'search_in_document',
-          ]
-        : []
-  const write =
-    hasDocument && docType === 'SHEET'
-      ? [
-          'set_cells',
-          'set_formulas',
-          'clear_range',
-          'format_range',
-          'set_column_widths',
-          'set_number_format',
-          'merge_range',
-          'set_borders',
-          'set_row_heights',
-          'insert_sheet',
-          'rename_sheet',
-          'delete_sheet',
-          'set_freeze',
-          'sort_range',
-          'create_filter',
-          'remove_filter',
-          'set_column_filter',
-          'replace_in_sheet',
-        ]
-      : hasDocument && docType === 'DOC'
-        ? [
-            'replace_text',
-            'replace_selection',
-            'insert_text',
-            'insert_paragraph',
-            'set_heading',
-            'set_list',
-            'format_text',
-          ]
-        : []
-  const plan = ['create_plan', 'update_plan']
-  let names: string[] = []
-  if (mode === 'chat') names = [...read]
-  if (mode === 'plan') names = [...read, ...plan]
-  if (mode === 'agent') {
-    names = [...read, ...write]
-    if (buildingPlan) names.push('update_plan')
-  }
-  return OFFICE_TOOLS.filter((t) => names.includes(t.function.name))
+  )
 }
 
 function mapBorderType(value: string): BorderType | null {
@@ -1327,22 +609,44 @@ export async function runOfficeTool(
   },
 ): Promise<string> {
   if (name === 'create_plan') {
+    const rawTodos = (args.todos as Array<{ id?: string; content?: string; status?: string }>) || []
     const plan = {
       name: String(args.name || 'План'),
       overview: String(args.overview || ''),
-      todos: (args.todos as Array<{ id: string; content: string }>) || [],
+      todos: rawTodos.map((t, i) => ({
+        id: String(t.id || i + 1),
+        content: String(t.content || ''),
+        ...(t.status ? { status: normalizePlanStatus(t.status) } : {}),
+      })),
     }
     ctx.setPlan(plan)
     return JSON.stringify({ ok: true, plan })
   }
   if (name === 'update_plan') {
-    if (!ctx.plan) return JSON.stringify({ error: 'no plan' })
-    const todos = args.todos as Array<{ id: string; content?: string; status?: string }>
+    if (!ctx.plan) {
+      return JSON.stringify({
+        error: 'no plan',
+        hint: 'План не загружен в runtime. Повторите update_plan после создания плана или перезапустите «Сделать по плану».',
+      })
+    }
+    const todos = Array.isArray(args.todos)
+      ? (args.todos as Array<{ id?: string; content?: string; status?: string }>)
+      : null
+    if (!todos?.length) {
+      return JSON.stringify({ error: 'todos required (non-empty array)' })
+    }
     const next = {
       ...ctx.plan,
-      todos: ctx.plan.todos.map((t) => {
-        const u = todos.find((x) => x.id === t.id)
-        return u ? { ...t, ...u } : t
+      todos: ctx.plan.todos.map((t, i) => {
+        const byId = todos.find((x) => x.id != null && String(x.id) === String(t.id))
+        const byIndex = byId ? undefined : todos[i]
+        const u = byId ?? byIndex
+        if (!u) return t
+        return {
+          ...t,
+          ...(u.content != null ? { content: String(u.content) } : {}),
+          ...(u.status != null ? { status: normalizePlanStatus(String(u.status)) } : {}),
+        }
       }),
     }
     ctx.setPlan(next)
@@ -1958,26 +1262,56 @@ export async function runOfficeTool(
         }
 
         const cells: Array<{ row: number; col: number; formula: string }> = []
+        const dense: string[][] = []
+        let denseOk = true
         for (let r = 0; r < numRows; r++) {
           const row = Array.isArray(formulas[r]) ? formulas[r] : []
+          const denseRow: string[] = []
           for (let c = 0; c < numCols; c++) {
             const raw = row[c] == null ? '' : String(row[c]).trim()
-            if (!raw || raw === '=') continue
-            cells.push({
-              row: startRow + r,
-              col: startCol + c,
-              formula: raw.startsWith('=') ? raw : `=${raw}`,
-            })
+            if (!raw || raw === '=') {
+              denseOk = false
+              continue
+            }
+            const formula = raw.startsWith('=') ? raw : `=${raw}`
+            cells.push({ row: startRow + r, col: startCol + c, formula })
+            denseRow.push(formula)
           }
+          if (denseOk) dense.push(denseRow)
         }
         if (!cells.length) {
-          return JSON.stringify({ error: 'no valid formulas in matrix' })
+          return JSON.stringify({
+            error: 'no valid formulas in matrix',
+            hint: 'Передайте непустые формулы; пустые ячейки можно опустить или вызвать set_formulas только для заполненных позиций.',
+          })
         }
 
-        for (const cell of cells) {
-          sheet.getRange(cell.row, cell.col, 1, 1).setFormulas([[cell.formula]])
-        }
         const written = a1Range(startRow, startCol, numRows, numCols)
+        try {
+          if (denseOk && dense.length === numRows && dense.every((row) => row.length === numCols)) {
+            sheet.getRange(startRow, startCol, numRows, numCols).setFormulas(dense)
+          } else {
+            for (const cell of cells) {
+              sheet.getRange(cell.row, cell.col, 1, 1).setFormulas([[cell.formula]])
+            }
+          }
+        } catch (writeError) {
+          // Fallback cell-by-cell if bulk write rejects a formula
+          for (const cell of cells) {
+            try {
+              sheet.getRange(cell.row, cell.col, 1, 1).setFormulas([[cell.formula]])
+            } catch {
+              return JSON.stringify({
+                error:
+                  writeError instanceof Error
+                    ? writeError.message
+                    : 'set_formulas failed',
+                hint: `Проблемная ячейка ${a1FromRowCol(cell.row, cell.col)}: ${cell.formula}. Используйте EN-имена функций и запятые в аргументах.`,
+                range: written,
+              })
+            }
+          }
+        }
         return JSON.stringify({
           ok: true,
           sheet: sheet.getSheetName(),
@@ -1988,6 +1322,127 @@ export async function runOfficeTool(
       } catch (error) {
         return JSON.stringify({
           error: error instanceof Error ? error.message : 'set_formulas failed',
+          hint: 'Проверьте start (A1) и формулу: ведущий =, EN-имена (SUM/IF/EDATE), аргументы через запятую.',
+        })
+      }
+    }
+    if (name === 'copy_formulas') {
+      try {
+        const source = String(args.source || '').trim()
+        const destination = String(args.destination || '').trim()
+        if (!source) return JSON.stringify({ error: 'source required' })
+        if (!destination) return JSON.stringify({ error: 'destination required' })
+        const times = Math.max(1, Math.min(200, Math.floor(Number(args.times) || 1)))
+        const srcRange = sheet.getRange(source)
+        const srcFormulas = (srcRange.getFormulas?.() ?? []) as string[][]
+        const srcValues = (srcRange.getValues?.() ?? []) as unknown[][]
+        const numRows = Math.max(srcFormulas.length, srcValues.length)
+        const numCols = Math.max(
+          ...srcFormulas.map((r) => r?.length ?? 0),
+          ...srcValues.map((r) => (Array.isArray(r) ? r.length : 0)),
+          0,
+        )
+        if (!numRows || !numCols) {
+          return JSON.stringify({ error: 'source range is empty' })
+        }
+        const destParsed = parseA1Cell(destination.includes(':') ? destination.split(':')[0] : destination)
+        if (!destParsed) {
+          return JSON.stringify({ error: `invalid destination: ${destination}` })
+        }
+        const srcA1 = srcRange.getA1Notation?.() || source
+        const srcStart = parseA1Cell(srcA1.replace(/^[^!]*!/, '').split(':')[0])
+        const srcStartRow = srcStart?.row ?? destParsed.row
+        const srcStartCol = srcStart?.col ?? destParsed.col
+
+        let writtenCells = 0
+        for (let t = 0; t < times; t++) {
+          const baseRow = destParsed.row + t * numRows
+          const baseCol = destParsed.col
+          const dRow = baseRow - srcStartRow
+          const dCol = baseCol - srcStartCol
+          const out: string[][] = []
+          for (let r = 0; r < numRows; r++) {
+            const rowOut: string[] = []
+            for (let c = 0; c < numCols; c++) {
+              const raw = String(srcFormulas[r]?.[c] ?? '').trim()
+              if (!raw || raw === '=') {
+                rowOut.push('')
+                continue
+              }
+              const withEq = raw.startsWith('=') ? raw : `=${raw}`
+              rowOut.push(adjustFormulaRefs(withEq, dRow, dCol))
+              writtenCells += 1
+            }
+            out.push(rowOut)
+          }
+          // Write non-empty cells only
+          for (let r = 0; r < numRows; r++) {
+            for (let c = 0; c < numCols; c++) {
+              const f = out[r][c]
+              if (!f) continue
+              sheet.getRange(baseRow + r, baseCol + c, 1, 1).setFormulas([[f]])
+            }
+          }
+        }
+        if (!writtenCells) {
+          return JSON.stringify({
+            error: 'no formulas in source range',
+            hint: 'Убедитесь, что source содержит формулы (не только значения).',
+          })
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          source: srcA1,
+          destination,
+          times,
+          cells: writtenCells,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'copy_formulas failed',
+        })
+      }
+    }
+    if (name === 'insert_image') {
+      try {
+        const url = String(args.url || '').trim()
+        if (!url) return JSON.stringify({ error: 'url required' })
+        if (!/^https?:\/\//i.test(url)) {
+          return JSON.stringify({ error: 'url must be http(s)' })
+        }
+        let col = 0
+        let row = 0
+        if (args.start != null && String(args.start).trim()) {
+          const parsed = parseA1Cell(String(args.start))
+          if (!parsed) {
+            return JSON.stringify({ error: `invalid start cell: ${String(args.start)}` })
+          }
+          col = parsed.col
+          row = parsed.row
+        }
+        const insert = (sheet as SheetHandle & {
+          insertImage?: (url: string, column?: number, row?: number) => Promise<boolean>
+        }).insertImage
+        if (typeof insert !== 'function') {
+          return JSON.stringify({
+            error: 'insertImage not supported',
+            hint: 'Drawing preset may be unavailable; insert the image manually.',
+          })
+        }
+        const ok = await insert.call(sheet, url, col, row)
+        if (!ok) {
+          return JSON.stringify({ error: 'insert_image failed' })
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          url,
+          start: a1FromRowCol(row, col),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error: error instanceof Error ? error.message : 'insert_image failed',
         })
       }
     }
@@ -2509,7 +1964,12 @@ export async function runOfficeTool(
               listType: PresetListType.CHECK_LIST,
             }))
         }
-        if (!ok) return JSON.stringify({ error: 'set_list failed' })
+        if (!ok) {
+          return JSON.stringify({
+            error: 'set_list failed',
+            hint: 'Укажите paragraphIndex или поставьте курсор в абзац; type: bullet|ordered|check|none.',
+          })
+        }
         return JSON.stringify({
           ok: true,
           type: listType,
@@ -2519,6 +1979,7 @@ export async function runOfficeTool(
       } catch (error) {
         return JSON.stringify({
           error: error instanceof Error ? error.message : 'set_list failed',
+          hint: 'Попробуйте insert_paragraph + set_list на новом абзаце.',
         })
       }
     }

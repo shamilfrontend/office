@@ -15,6 +15,12 @@ import { isToolAutoAllowed } from '@/composables/useAiToolPermissions'
 import { useAuthStore } from '@/stores/auth'
 import type { UniverApi } from '@/univer/useUniver'
 import {
+  parsePlanMarkdown,
+  planAllTodosDone,
+  planToMarkdown,
+  type Plan,
+} from '@office/shared'
+import {
   describeImpact,
   isDocumentWriteTool,
   needsApprove,
@@ -25,11 +31,6 @@ import {
 } from '@/univer/officeTools'
 
 type ToolCall = { id: string; name: string; arguments: string }
-type Plan = {
-  name: string
-  overview: string
-  todos: Array<{ id: string; content: string; status?: string }>
-}
 type UiMsg =
   | { key: string; role: 'user'; content: string; wire: string }
   | { key: string; role: 'assistant'; content: string; toolCalls?: ToolCall[] }
@@ -592,55 +593,6 @@ function modeLabel(mode: ChatMode) {
 function compact(n: number) {
   if (n >= 1000) return `${Math.max(1, Math.round(n / 1000))}K`
   return String(Math.max(0, Math.round(n)))
-}
-
-function planToMarkdown(plan: Plan) {
-  const todos = plan.todos
-    .map((todo) => {
-      const done = todo.status === 'done' || todo.status === 'completed'
-      return `- [${done ? 'x' : ' '}] ${todo.content}`
-    })
-    .join('\n')
-  return `# ${plan.name}\n\n${plan.overview}\n\n${todos}`.trim()
-}
-
-function parsePlanMarkdown(markdown: string): Plan {
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
-  let name = 'План'
-  let i = 0
-  if (lines[0]?.startsWith('# ')) {
-    name = lines[0].slice(2).trim() || 'План'
-    i = 1
-    while (i < lines.length && !lines[i].trim()) i += 1
-  }
-  const overviewLines: string[] = []
-  while (i < lines.length && !/^-\s+\[[ xX]\]\s+/.test(lines[i])) {
-    overviewLines.push(lines[i])
-    i += 1
-  }
-  const todos: Plan['todos'] = []
-  while (i < lines.length) {
-    const match = lines[i].match(/^-\s+\[([ xX])\]\s+(.+)$/)
-    if (match) {
-      const done = match[1].toLowerCase() === 'x'
-      todos.push({
-        id: String(todos.length + 1),
-        content: match[2].trim(),
-        ...(done ? { status: 'completed' } : {}),
-      })
-    }
-    i += 1
-  }
-  return {
-    name,
-    overview: overviewLines.join('\n').trim(),
-    todos,
-  }
-}
-
-function planAllTodosDone(plan: Plan | null): boolean {
-  if (!plan?.todos.length) return false
-  return plan.todos.every((t) => t.status === 'done' || t.status === 'completed')
 }
 
 function titleFromMarkdown(markdown: string, fallback: string) {
@@ -1491,6 +1443,14 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
         }
       }
       if (signal?.aborted) return 'aborted'
+      // Keep runtime plan hydrated for update_plan (reload / «Сделать по плану» from markdown).
+      if (
+        (call.name === 'update_plan' || call.name === 'create_plan') &&
+        !tab.plan &&
+        tab.planMarkdown
+      ) {
+        tab.plan = parsePlanMarkdown(tab.planMarkdown)
+      }
       let result: string
       try {
         result = await runOfficeTool(call.name, args, {
@@ -1504,6 +1464,7 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
       } catch (error) {
         result = JSON.stringify({
           error: error instanceof Error ? error.message : 'tool failed',
+          hint: 'Исправьте аргументы tool и повторите вызов; не повторяйте тот же ошибочный payload.',
         })
       }
       if ((call.name === 'create_plan' || call.name === 'update_plan') && tab.plan) {
@@ -1540,9 +1501,11 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
       })
       if (status === 'error') {
         consecutiveToolErrors += 1
-        if (consecutiveToolErrors >= 3) {
+        // During plan execution allow more recoveries — model often fixes empty formulas etc.
+        const errorBudget = tab.executingPlan ? 5 : 3
+        if (consecutiveToolErrors >= errorBudget) {
           const content =
-            'Остановка: несколько tool-вызовов подряд завершились ошибкой. Уточните задачу или проверьте выделение.'
+            'Остановка: несколько tool-вызовов подряд завершились ошибкой. Уточните задачу или проверьте выделение. Подробности — в логе сессии.'
           tab.messages.push({
             key: crypto.randomUUID(),
             role: 'assistant',

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@office/shared": "file:../../packages/shared",
     "@mertdeveci55/univer-import-export": "^0.2.1",
     "@univerjs/preset-docs-core": "^1.0.4",
     "@univerjs/preset-sheets-core": "^1.0.4",

@@ -23,6 +23,7 @@ export const AI_PERMISSION_CATEGORIES: AiPermissionCategoryMeta[] = [
 const TOOL_TO_CATEGORY: Record<string, AiPermissionCategory> = {
   set_cells: 'sheetData',
   set_formulas: 'sheetData',
+  copy_formulas: 'sheetData',
   clear_range: 'sheetData',
   replace_in_sheet: 'sheetData',
   sort_range: 'sheetData',
@@ -32,6 +33,7 @@ const TOOL_TO_CATEGORY: Record<string, AiPermissionCategory> = {
   merge_range: 'sheetFormat',
   set_column_widths: 'sheetFormat',
   set_row_heights: 'sheetFormat',
+  insert_image: 'sheetFormat',
   delete_sheet: 'deleteSheet',
   replace_text: 'docEdits',
   replace_selection: 'docEdits',

@@ -18,6 +18,7 @@ import type { User } from '@prisma/client';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { MulterFile } from '../types/uploaded-file';
 import { DocType, FilesService } from './files.service';
 import type { DownloadFormat } from './files.service';
 
@@ -37,7 +38,7 @@ export class FilesController {
   )
   upload(
     @CurrentUser() user: User,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: MulterFile,
     @Body() body: { type?: string },
   ) {
     return this.files.uploadFromComputer(user, file, body?.type);

@@ -51,6 +51,34 @@ export type UniverDocument = {
   findParagraphByText?: (text: string) => DocParagraph | null
 }
 
+export type DataValidationBuilder = {
+  requireValueInList: (
+    values: string[],
+    multiple?: boolean,
+    showDropdown?: boolean,
+  ) => DataValidationBuilder
+  requireNumberBetween: (
+    start: number,
+    end: number,
+    isInteger?: boolean,
+  ) => DataValidationBuilder
+  requireNumberGreaterThan: (
+    num: number,
+    isInteger?: boolean,
+  ) => DataValidationBuilder
+  requireNumberLessThan: (
+    num: number,
+    isInteger?: boolean,
+  ) => DataValidationBuilder
+  setOptions: (options: {
+    allowBlank?: boolean
+    showErrorMessage?: boolean
+    error?: string
+    showDropDown?: boolean
+  }) => DataValidationBuilder
+  build: () => unknown
+}
+
 export type UniverApi = {
   createWorkbook: (data?: object) => unknown
   createDocument: (data?: object) => unknown
@@ -58,6 +86,7 @@ export type UniverApi = {
   getActiveDocument: () => UniverDocument | null
   disposeUnit: (id: string) => void
   getHooks?: () => unknown
+  newDataValidation?: () => DataValidationBuilder
 }
 
 export function useUniverHost() {
@@ -87,6 +116,12 @@ export function useUniverHost() {
     const { UniverSheetsFilterPreset } = await import(
       '@univerjs/preset-sheets-filter'
     )
+    const { UniverSheetsConditionalFormattingPreset } = await import(
+      '@univerjs/preset-sheets-conditional-formatting'
+    )
+    const { UniverSheetsDataValidationPreset } = await import(
+      '@univerjs/preset-sheets-data-validation'
+    )
     const locale = (
       await import('@univerjs/preset-sheets-core/locales/ru-RU')
     ).default
@@ -99,10 +134,20 @@ export function useUniverHost() {
     const filterLocale = (
       await import('@univerjs/preset-sheets-filter/locales/ru-RU')
     ).default
+    const conditionalFormattingLocale = (
+      await import(
+        '@univerjs/preset-sheets-conditional-formatting/locales/ru-RU'
+      )
+    ).default
+    const dataValidationLocale = (
+      await import('@univerjs/preset-sheets-data-validation/locales/ru-RU')
+    ).default
     await import('@univerjs/preset-sheets-core/lib/index.css')
     await import('@univerjs/preset-sheets-drawing/lib/index.css')
     await import('@univerjs/preset-sheets-sort/lib/index.css')
     await import('@univerjs/preset-sheets-filter/lib/index.css')
+    await import('@univerjs/preset-sheets-conditional-formatting/lib/index.css')
+    await import('@univerjs/preset-sheets-data-validation/lib/index.css')
 
     const created = createUniver({
       locale: LocaleType.RU_RU,
@@ -112,6 +157,8 @@ export function useUniverHost() {
           drawingLocale,
           sortLocale,
           filterLocale,
+          conditionalFormattingLocale,
+          dataValidationLocale,
         ),
       },
       presets: [
@@ -121,6 +168,8 @@ export function useUniverHost() {
         UniverSheetsDrawingPreset(),
         UniverSheetsSortPreset(),
         UniverSheetsFilterPreset(),
+        UniverSheetsConditionalFormattingPreset(),
+        UniverSheetsDataValidationPreset(),
       ],
     })
     const univer = created.univer as {

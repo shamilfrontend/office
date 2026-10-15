@@ -84,6 +84,38 @@ assert(f3 === '=F9', `simple shift: ${f3}`)
 assert(s.WRITE_TOOL_NAMES.has('copy_formulas'), 'WRITE has copy_formulas')
 assert(s.WRITE_TOOL_NAMES.has('insert_image'), 'WRITE has insert_image')
 assert(s.ALL_TOOL_NAMES.has('insert_image'), 'ALL has insert_image')
+assert(
+  s.WRITE_TOOL_NAMES.has('add_conditional_highlight'),
+  'WRITE has add_conditional_highlight',
+)
+assert(
+  s.WRITE_TOOL_NAMES.has('clear_conditional_formatting'),
+  'WRITE has clear_conditional_formatting',
+)
+assert(s.WRITE_TOOL_NAMES.has('set_list_validation'), 'WRITE has set_list_validation')
+assert(
+  s.WRITE_TOOL_NAMES.has('set_number_validation'),
+  'WRITE has set_number_validation',
+)
+assert(
+  s.WRITE_TOOL_NAMES.has('clear_data_validation'),
+  'WRITE has clear_data_validation',
+)
+const highlight = s.OFFICE_TOOLS.find(
+  (t) => t.function.name === 'add_conditional_highlight',
+)
+const highlightEnum = highlight?.function?.parameters?.properties?.condition?.enum
+assert(
+  Array.isArray(highlightEnum) &&
+    highlightEnum.includes('text_contains') &&
+    highlightEnum.includes('duplicate'),
+  'add_conditional_highlight has text_contains/duplicate',
+)
+assert(
+  s.ALL_TOOL_NAMES.has('get_conditional_formatting'),
+  'ALL has get_conditional_formatting',
+)
+assert(s.ALL_TOOL_NAMES.has('get_data_validations'), 'ALL has get_data_validations')
 
 // 8) status normalize
 assert(s.normalizePlanStatus('done') === 'completed', 'normalize done')

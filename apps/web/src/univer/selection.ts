@@ -42,6 +42,37 @@ export type SheetSortBy =
   | { column: number; ascending?: boolean }
   | Array<{ column: number; ascending?: boolean }>
 
+export type CfRuleLike = {
+  cfId?: string
+  ranges?: Array<{
+    startRow: number
+    startColumn: number
+    endRow: number
+    endColumn: number
+  }>
+  rule?: { type?: string; subType?: string; operator?: string; value?: unknown }
+}
+
+export type DataValidationRuleLike = {
+  rule?: { uid?: string; type?: string; formula1?: string; formula2?: string }
+  getCriteriaType?: () => string
+  getCriteriaValues?: () => [string | undefined, string | undefined, string | undefined]
+  getRanges?: () => Array<{ getA1Notation?: () => string }>
+  uid?: string
+}
+
+export type CfRuleBuilder = {
+  whenCellEmpty: () => CfRuleBuilder
+  whenCellNotEmpty: () => CfRuleBuilder
+  whenNumberBetween: (start: number, end: number) => CfRuleBuilder
+  whenTextContains: (text: string) => CfRuleBuilder
+  setDuplicateValues: () => CfRuleBuilder
+  setBackground: (color: string) => CfRuleBuilder
+  setFontColor: (color: string) => CfRuleBuilder
+  setRanges: (ranges: unknown[]) => CfRuleBuilder
+  build: () => CfRuleLike
+}
+
 export type SheetRange = {
   getA1Notation: (withSheet?: boolean) => string
   getValues: () => unknown[][]
@@ -67,6 +98,12 @@ export type SheetRange = {
   mergeAcross?: (options?: { isForceMerge?: boolean }) => unknown
   mergeVertically?: (options?: { isForceMerge?: boolean }) => unknown
   breakApart?: () => unknown
+  getConditionalFormattingRules?: () => CfRuleLike[]
+  createConditionalFormattingRule?: () => CfRuleBuilder
+  clearConditionalFormatRules?: () => unknown
+  setDataValidation?: (rule: unknown | null) => unknown
+  getDataValidation?: () => DataValidationRuleLike | null
+  getDataValidations?: () => DataValidationRuleLike[]
 }
 
 export type SheetHandle = {
@@ -94,6 +131,12 @@ export type SheetHandle = {
   cancelFreeze?: () => unknown
   getFrozenRows?: () => number
   getFrozenColumns?: () => number
+  newConditionalFormattingRule?: () => CfRuleBuilder
+  addConditionalFormattingRule?: (rule: CfRuleLike) => unknown
+  getConditionalFormattingRules?: () => CfRuleLike[]
+  deleteConditionalFormattingRule?: (cfId: string) => unknown
+  clearConditionalFormatRules?: () => unknown
+  getDataValidations?: () => DataValidationRuleLike[]
 }
 
 export type SheetApi = {

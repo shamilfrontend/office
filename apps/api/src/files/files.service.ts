@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserStorageService } from '../storage/user-storage.service';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
+import type { MulterFile } from '../types/uploaded-file';
 import { decodeUploadFilename } from './decode-filename';
 import {
   docToDocx,
@@ -122,7 +123,7 @@ export class FilesService {
 
   async uploadFromComputer(
     user: User,
-    file: Express.Multer.File,
+    file: MulterFile,
     typeHint?: string,
   ) {
     if (!file) throw new BadRequestException('File required');

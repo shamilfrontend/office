@@ -24,6 +24,8 @@ import {
   indexToColLetters,
   parseA1Cell,
   resolveColumnIndex,
+  type CfRuleLike,
+  type DataValidationRuleLike,
   type SheetFilterHandle,
   type SheetHandle,
   type SheetRange,
@@ -92,7 +94,18 @@ export function needsApprove(
     name === 'replace_text' ||
     name === 'replace_in_sheet' ||
     name === 'delete_sheet' ||
-    name === 'sort_range'
+    name === 'insert_sheet' ||
+    name === 'rename_sheet' ||
+    name === 'set_freeze' ||
+    name === 'sort_range' ||
+    name === 'create_filter' ||
+    name === 'remove_filter' ||
+    name === 'set_column_filter' ||
+    name === 'add_conditional_highlight' ||
+    name === 'clear_conditional_formatting' ||
+    name === 'set_list_validation' ||
+    name === 'set_number_validation' ||
+    name === 'clear_data_validation'
   ) {
     return true
   }
@@ -271,6 +284,41 @@ export function describeImpact(
     if (args.clear) return { title, detail: `очистить колонку ${col}` }
     const values = Array.isArray(args.values) ? args.values.length : 0
     return { title, detail: `колонка ${col}, ${values} значений` }
+  }
+  if (name === 'add_conditional_highlight') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    const condition = String(args.condition ?? '')
+    const extra =
+      condition === 'text_contains' && args.text != null
+        ? ` «${String(args.text)}»`
+        : ''
+    return {
+      title,
+      detail: `${condition}${extra} на ${a1}`,
+    }
+  }
+  if (name === 'clear_conditional_formatting') {
+    if (args.all) return { title, detail: 'все правила листа' }
+    if (args.cfId != null) return { title, detail: `cfId ${String(args.cfId)}` }
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    return { title, detail: a1 }
+  }
+  if (name === 'set_list_validation') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    const n = Array.isArray(args.values) ? args.values.length : 0
+    return { title, detail: `${a1}, ${n} значений` }
+  }
+  if (name === 'set_number_validation') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    const op = String(args.op ?? '')
+    let bound = ''
+    if (op === 'between') bound = ` [${args.min}, ${args.max}]`
+    else if (args.value != null) bound = ` ${args.value}`
+    return { title, detail: `${a1}, ${op}${bound}` }
+  }
+  if (name === 'clear_data_validation') {
+    const a1 = resolvedRangeA1(api, args.range) || 'выделение'
+    return { title, detail: a1 }
   }
   return { title, detail: '' }
 }
@@ -555,6 +603,51 @@ function replaceAllCaseInsensitive(
     i = at + search.length
   }
   return out
+}
+
+function a1FromIRange(r: {
+  startRow: number
+  startColumn: number
+  endRow: number
+  endColumn: number
+}): string {
+  const start = a1FromRowCol(r.startRow, r.startColumn)
+  const end = a1FromRowCol(r.endRow, r.endColumn)
+  return start === end ? start : `${start}:${end}`
+}
+
+function summarizeCfRule(rule: CfRuleLike): {
+  cfId: string | null
+  ranges: string[]
+  condition: string
+} {
+  const cfg = rule.rule
+  let condition = 'unknown'
+  if (cfg && typeof cfg === 'object') {
+    const parts = [cfg.subType, cfg.operator, cfg.type].filter(Boolean)
+    condition = parts.length ? parts.map(String).join(':') : 'unknown'
+  }
+  return {
+    cfId: rule.cfId ?? null,
+    ranges: (rule.ranges ?? []).map(a1FromIRange),
+    condition,
+  }
+}
+
+function serializeDataValidation(rule: DataValidationRuleLike): {
+  uid: string | null
+  type: string | null
+  criteria: [string | undefined, string | undefined, string | undefined] | null
+  ranges: string[]
+} {
+  const ranges =
+    rule.getRanges?.().map((r) => r.getA1Notation?.() ?? '').filter(Boolean) ?? []
+  return {
+    uid: rule.rule?.uid ?? rule.uid ?? null,
+    type: rule.getCriteriaType?.() ?? rule.rule?.type ?? null,
+    criteria: rule.getCriteriaValues?.() ?? null,
+    ranges,
+  }
 }
 
 function truncateMatrix(values: unknown[][]): {
@@ -944,6 +1037,337 @@ export async function runOfficeTool(
         return JSON.stringify({
           error:
             error instanceof Error ? error.message : 'set_column_filter failed',
+        })
+      }
+    }
+    if (name === 'get_conditional_formatting') {
+      try {
+        const a1 = args.range != null ? String(args.range).trim() : ''
+        let rules: CfRuleLike[] = []
+        if (a1) {
+          const range = sheet.getRange(a1)
+          if (!range.getConditionalFormattingRules) {
+            return JSON.stringify({
+              error: 'get_conditional_formatting not supported',
+            })
+          }
+          rules = range.getConditionalFormattingRules() ?? []
+        } else {
+          if (!sheet.getConditionalFormattingRules) {
+            return JSON.stringify({
+              error: 'get_conditional_formatting not supported',
+            })
+          }
+          rules = sheet.getConditionalFormattingRules() ?? []
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: a1 || null,
+          rules: rules.map(summarizeCfRule),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'get_conditional_formatting failed',
+        })
+      }
+    }
+    if (name === 'add_conditional_highlight') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!sheet.newConditionalFormattingRule || !sheet.addConditionalFormattingRule) {
+          return JSON.stringify({
+            error: 'add_conditional_highlight not supported',
+          })
+        }
+        const condition = String(args.condition ?? '').trim()
+        let builder = sheet.newConditionalFormattingRule()
+        if (condition === 'empty') builder = builder.whenCellEmpty()
+        else if (condition === 'not_empty') builder = builder.whenCellNotEmpty()
+        else if (condition === 'number_between') {
+          const min = Number(args.min)
+          const max = Number(args.max)
+          if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            return JSON.stringify({
+              error: 'number_between requires numeric min and max',
+            })
+          }
+          builder = builder.whenNumberBetween(min, max)
+        } else if (condition === 'text_contains') {
+          const text = args.text != null ? String(args.text) : ''
+          if (!text) {
+            return JSON.stringify({
+              error: 'text_contains requires text',
+            })
+          }
+          builder = builder.whenTextContains(text)
+        } else if (condition === 'duplicate') {
+          builder = builder.setDuplicateValues()
+        } else {
+          return JSON.stringify({
+            error:
+              'condition must be empty | not_empty | number_between | text_contains | duplicate',
+          })
+        }
+        const bg =
+          args.backgroundColor != null
+            ? String(args.backgroundColor)
+            : '#FFEB9C'
+        builder = builder.setBackground(bg)
+        if (args.fontColor != null) {
+          builder = builder.setFontColor(String(args.fontColor))
+        }
+        const iRange = range.getRange?.()
+        if (!iRange) {
+          return JSON.stringify({ error: 'range bounds unavailable' })
+        }
+        const rule = builder.setRanges([iRange]).build()
+        sheet.addConditionalFormattingRule(rule)
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          rule: summarizeCfRule(rule),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'add_conditional_highlight failed',
+        })
+      }
+    }
+    if (name === 'clear_conditional_formatting') {
+      try {
+        if (args.all) {
+          if (!sheet.clearConditionalFormatRules) {
+            return JSON.stringify({
+              error: 'clear_conditional_formatting not supported',
+            })
+          }
+          sheet.clearConditionalFormatRules()
+          return JSON.stringify({
+            ok: true,
+            sheet: sheet.getSheetName(),
+            cleared: 'all',
+          })
+        }
+        if (args.cfId != null) {
+          const cfId = String(args.cfId)
+          if (!sheet.deleteConditionalFormattingRule) {
+            return JSON.stringify({
+              error: 'clear_conditional_formatting not supported',
+            })
+          }
+          sheet.deleteConditionalFormattingRule(cfId)
+          return JSON.stringify({
+            ok: true,
+            sheet: sheet.getSheetName(),
+            cleared: cfId,
+          })
+        }
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!range.clearConditionalFormatRules) {
+          return JSON.stringify({
+            error: 'clear_conditional_formatting not supported',
+          })
+        }
+        range.clearConditionalFormatRules()
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          cleared: 'range',
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'clear_conditional_formatting failed',
+        })
+      }
+    }
+    if (name === 'get_data_validations') {
+      try {
+        const a1 = args.range != null ? String(args.range).trim() : ''
+        let rules: DataValidationRuleLike[] = []
+        if (a1) {
+          const range = sheet.getRange(a1)
+          if (!range.getDataValidations) {
+            return JSON.stringify({
+              error: 'get_data_validations not supported',
+            })
+          }
+          rules = range.getDataValidations() ?? []
+        } else {
+          if (!sheet.getDataValidations) {
+            return JSON.stringify({
+              error: 'get_data_validations not supported',
+            })
+          }
+          rules = sheet.getDataValidations() ?? []
+        }
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: a1 || null,
+          rules: rules.map(serializeDataValidation),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'get_data_validations failed',
+        })
+      }
+    }
+    if (name === 'set_list_validation') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!ctx.api.newDataValidation || !range.setDataValidation) {
+          return JSON.stringify({ error: 'set_list_validation not supported' })
+        }
+        const values = Array.isArray(args.values)
+          ? args.values.map((v) => String(v))
+          : []
+        if (!values.length) {
+          return JSON.stringify({ error: 'values required (non-empty array)' })
+        }
+        const showDropdown = args.showDropdown !== false
+        const allowBlank = args.allowBlank !== false
+        const errorMsg =
+          args.error != null ? String(args.error) : undefined
+        const rule = ctx.api
+          .newDataValidation()
+          .requireValueInList(values, false, showDropdown)
+          .setOptions({
+            allowBlank,
+            showDropDown: showDropdown,
+            showErrorMessage: Boolean(errorMsg),
+            ...(errorMsg ? { error: errorMsg } : {}),
+          })
+          .build()
+        range.setDataValidation(rule)
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          values,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'set_list_validation failed',
+        })
+      }
+    }
+    if (name === 'set_number_validation') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!ctx.api.newDataValidation || !range.setDataValidation) {
+          return JSON.stringify({
+            error: 'set_number_validation not supported',
+          })
+        }
+        const op = String(args.op ?? '').trim()
+        const integer = Boolean(args.integer)
+        let builder = ctx.api.newDataValidation()
+        if (op === 'between') {
+          const min = Number(args.min)
+          const max = Number(args.max)
+          if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            return JSON.stringify({
+              error: 'between requires numeric min and max',
+            })
+          }
+          builder = builder.requireNumberBetween(min, max, integer)
+        } else if (op === 'greater_than') {
+          const value = Number(args.value)
+          if (!Number.isFinite(value)) {
+            return JSON.stringify({
+              error: 'greater_than requires numeric value',
+            })
+          }
+          builder = builder.requireNumberGreaterThan(value, integer)
+        } else if (op === 'less_than') {
+          const value = Number(args.value)
+          if (!Number.isFinite(value)) {
+            return JSON.stringify({
+              error: 'less_than requires numeric value',
+            })
+          }
+          builder = builder.requireNumberLessThan(value, integer)
+        } else {
+          return JSON.stringify({
+            error: 'op must be between | greater_than | less_than',
+          })
+        }
+        const allowBlank = args.allowBlank !== false
+        const errorMsg =
+          args.error != null ? String(args.error) : undefined
+        const rule = builder
+          .setOptions({
+            allowBlank,
+            showErrorMessage: Boolean(errorMsg),
+            ...(errorMsg ? { error: errorMsg } : {}),
+          })
+          .build()
+        range.setDataValidation(rule)
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          op,
+          integer,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'set_number_validation failed',
+        })
+      }
+    }
+    if (name === 'clear_data_validation') {
+      try {
+        const resolved = resolveSheetRangeA1(sheet, wb, args.range)
+        if ('error' in resolved) return JSON.stringify(resolved)
+        const { range } = resolved
+        if (!range.setDataValidation) {
+          return JSON.stringify({
+            error: 'clear_data_validation not supported',
+          })
+        }
+        range.setDataValidation(null)
+        return JSON.stringify({
+          ok: true,
+          sheet: sheet.getSheetName(),
+          range: range.getA1Notation(),
+          cleared: true,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'clear_data_validation failed',
         })
       }
     }

@@ -18,6 +18,7 @@ import type { User } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { MulterFile } from '../types/uploaded-file';
 import { AiService } from './ai.service';
 import { ProviderKind } from './ai.providers';
 import { sanitizeChatRequest } from './chat-request';
@@ -66,7 +67,11 @@ export class AiController {
   @Post('providers/test')
   test(
     @Body()
-    body: { provider: ProviderKind; baseUrl?: string; apiKey?: string },
+    body: {
+      provider: ProviderKind;
+      baseUrl?: string;
+      apiKey?: string;
+    },
   ) {
     return this.ai.testConnection(body);
   }
@@ -108,6 +113,7 @@ export class AiController {
       documentId?: string | null;
       planTitle?: string | null;
       planMarkdown?: string | null;
+      planExecuted?: boolean | null;
       pinnedOpen?: boolean;
       sortOrder?: number;
     },
@@ -146,9 +152,7 @@ export class AiController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
-  extract(
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  extract(@UploadedFile() file: MulterFile) {
     return this.ai.extractAttachment(file);
   }
 

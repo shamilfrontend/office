@@ -45,8 +45,9 @@ model Chat {
   providerId   String?
   model        String?
   documentId   String?
-  planTitle    String?
-  planMarkdown String?
+  planTitle     String?
+  planMarkdown  String?
+  planExecuted  Boolean?
   pinnedOpen   Boolean   @default(true)
   sortOrder    Int       @default(0)
   createdAt    DateTime  @default(now())

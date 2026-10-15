@@ -3,17 +3,18 @@
   "version": "0.0.1",
   "private": true,
   "main": "./dist/index.js",
+  "module": "./dist/esm/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
       "require": "./dist/index.js",
-      "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
     "prepare": "npm run build",
     "smoke": "npm run build && node scripts/smoke.mjs"
   },

@@ -178,6 +178,7 @@ export type ChatSummary = {
   documentId: string | null
   planTitle: string | null
   planMarkdown: string | null
+  planExecuted: boolean | null
   pinnedOpen: boolean
   sortOrder: number
   createdAt: string

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import AiChatPanel from '@/components/AiChatPanel.vue'
 import AppLogo from '@/components/AppLogo.vue'
@@ -96,26 +96,17 @@ function showSavedFeedback() {
   }, 2000)
 }
 
+function markDirty() {
+  saveState.value = 'dirty'
+  scheduleSave()
+}
+
 function bindDirtyListeners() {
   const el = container.value
   if (!el || dirtyListenerBound) return
   dirtyListenerBound = true
-  el.addEventListener(
-    'keydown',
-    () => {
-      saveState.value = 'dirty'
-      scheduleSave()
-    },
-    true,
-  )
-  el.addEventListener(
-    'pointerup',
-    () => {
-      saveState.value = 'dirty'
-      scheduleSave()
-    },
-    true,
-  )
+  el.addEventListener('keydown', markDirty, true)
+  el.addEventListener('pointerup', markDirty, true)
 }
 
 function scheduleSave() {
@@ -123,6 +114,25 @@ function scheduleSave() {
   saveTimer = setTimeout(() => {
     void save()
   }, 1200)
+}
+
+function onDocumentChanged() {
+  markDirty()
+}
+
+async function confirmLeaveIfDirty(): Promise<boolean> {
+  if (saveState.value !== 'dirty' && saveState.value !== 'saving') return true
+  const ok = await uiConfirm({
+    title: 'Сохранить изменения?',
+    message:
+      'Документ ещё не сохранён. Без сохранения правки пропадут.',
+    confirmLabel: 'Сохранить',
+    cancelLabel: 'Отмена',
+    danger: false,
+  })
+  if (!ok) return false
+  await flushSave()
+  return saveState.value !== 'dirty'
 }
 
 async function save() {
@@ -149,7 +159,7 @@ async function save() {
 
 function onTitleChange() {
   fileTabs.rename(docId.value, docName.value)
-  scheduleSave()
+  markDirty()
 }
 
 async function download(format: 'json' | 'csv' | 'xlsx' | 'docx') {
@@ -194,8 +204,7 @@ async function restoreCheckpoint() {
   if (!ok) return
   if (docType.value === 'SHEET') await mountSheet(checkpoint.value as object)
   else await mountDoc(checkpoint.value as object)
-  saveState.value = 'dirty'
-  scheduleSave()
+  markDirty()
 }
 
 function selectionContext() {
@@ -249,9 +258,16 @@ async function createAndOpen(type: 'SHEET' | 'DOC') {
 
 async function openFromFiles() {
   newMenuOpen.value = false
-  await flushSave()
   await router.push('/home')
 }
+
+onBeforeRouteLeave(async (to) => {
+  if (String(to.path).startsWith('/edit/')) {
+    await flushSave()
+    return true
+  }
+  return confirmLeaveIfDirty()
+})
 
 watch(
   docId,
@@ -440,6 +456,7 @@ watch(
         @toggle="toggleChat"
         @checkpoint="takeCheckpoint"
         @restore-checkpoint="restoreCheckpoint"
+        @document-changed="onDocumentChanged"
       />
     </div>
   </div>

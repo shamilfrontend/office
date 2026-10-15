@@ -123,6 +123,7 @@ const emit = defineEmits<{
   toggle: []
   checkpoint: []
   restoreCheckpoint: []
+  documentChanged: []
 }>()
 
 const WIDTH_KEY = 'office_chat_width'
@@ -606,6 +607,25 @@ function shortTitle(text: string) {
   return clean.length > 22 ? `${clean.slice(0, 22)}…` : clean
 }
 
+function planWasExecuted(record: ChatRecord): boolean {
+  if (record.planExecuted === true) return true
+  if (record.planExecuted === false) return false
+  let lastCreate = -1
+  let lastRun = -1
+  record.messages.forEach((message, index) => {
+    if (message.role === 'tool' && message.toolName === 'create_plan') lastCreate = index
+    if (message.role === 'user' && message.content.startsWith('Сделать по плану')) {
+      lastRun = index
+    }
+  })
+  if (lastRun < 0 || lastRun < lastCreate) return false
+  const assistant = [...record.messages.slice(lastRun + 1)]
+    .reverse()
+    .find((message) => message.role === 'assistant')
+  if (!assistant) return false
+  return !/Остановлено|Отклонено/.test(assistant.content)
+}
+
 function tabFromRecord(record: ChatRecord): Tab {
   const providerId = record.providerId || providers.value[0]?.id || ''
   const providerModel =
@@ -627,7 +647,7 @@ function tabFromRecord(record: ChatRecord): Tab {
     planTitle: record.planTitle,
     planMarkdown: record.planMarkdown,
     planEdited: false,
-    planRunState: planAllTodosDone(plan) ? 'done' : 'idle',
+    planRunState: planWasExecuted(record) || planAllTodosDone(plan) ? 'done' : 'idle',
     streaming: false,
     tokenRate: null,
     tokenMeta: null,
@@ -679,7 +699,13 @@ async function loadTabs() {
   try {
     const rows = await api.listOpenChats(forDoc)
     if (props.documentId !== forDoc) return
-    tabs.value = rows.map(tabFromRecord)
+    tabs.value = rows.map((record) => {
+      const tab = tabFromRecord(record)
+      if (record.planExecuted == null && tab.planRunState === 'done') {
+        void patchTab(tab, { planExecuted: true })
+      }
+      return tab
+    })
     activeId.value = tabs.value[0]?.id || ''
     await ensureDefaultModel()
   } catch (e) {
@@ -1017,7 +1043,11 @@ async function savePlan() {
   tab.planEdited = true
   tab.planRunState = 'idle'
   planOpen.value = false
-  await patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
+  await patchTab(tab, {
+    planTitle: tab.planTitle,
+    planMarkdown: tab.planMarkdown,
+    planExecuted: false,
+  })
 }
 
 async function runPlan() {
@@ -1040,6 +1070,7 @@ async function runPlan() {
       tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle'
     } else {
       tab.planRunState = 'done'
+      void patchTab(tab, { planExecuted: true })
     }
   } finally {
     tab.executingPlan = false
@@ -1473,7 +1504,11 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
           tab.planRunState = 'idle'
           tab.planTitle = tab.plan.name
           tab.planMarkdown = planToMarkdown(tab.plan)
-          void patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
+          void patchTab(tab, {
+            planTitle: tab.planTitle,
+            planMarkdown: tab.planMarkdown,
+            planExecuted: false,
+          })
         } else if (tab.executingPlan || !tab.planEdited) {
           tab.planTitle = tab.plan.name
           tab.planMarkdown = planToMarkdown(tab.plan)
@@ -1485,6 +1520,7 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
       setToolRow(tab, toolKey, result.slice(0, 500), result, status)
       if (status !== 'error' && isDocumentWriteTool(call.name)) {
         tab.wroteSinceCheckpoint = true
+        emit('documentChanged')
       }
       pushSessionLog(tab, {
         kind: 'tool',
@@ -1977,7 +2013,11 @@ watch(
           </div>
         </div>
 
-        <section v-if="active.planMarkdown" class="plan-card" :class="active.planRunState">
+        <section
+          v-if="active.planMarkdown && active.planRunState !== 'done'"
+          class="plan-card"
+          :class="active.planRunState"
+        >
           <div class="kicker">
             <span>План</span>
             <span v-if="active.planRunState === 'done'" class="plan-badge">Выполнено</span>

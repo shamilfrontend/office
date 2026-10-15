@@ -253,6 +253,213 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'get_conditional_formatting',
+      description:
+        'List conditional formatting rules on a range (or whole active sheet if range omitted)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → all rules on active sheet',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_conditional_highlight',
+      description:
+        'Add a highlight conditional format: empty / not_empty / number_between / text_contains / duplicate on a range (or selection)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          condition: {
+            type: 'string',
+            enum: [
+              'empty',
+              'not_empty',
+              'number_between',
+              'text_contains',
+              'duplicate',
+            ],
+            description:
+              'Highlight when empty, not empty, number in [min,max], text contains, or duplicate values',
+          },
+          min: {
+            type: 'number',
+            description: 'Required for number_between',
+          },
+          max: {
+            type: 'number',
+            description: 'Required for number_between',
+          },
+          text: {
+            type: 'string',
+            description: 'Required for text_contains',
+          },
+          backgroundColor: {
+            type: 'string',
+            description: 'Background hex, default #FFEB9C',
+          },
+          fontColor: {
+            type: 'string',
+            description: 'Optional font color hex',
+          },
+        },
+        required: ['condition'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clear_conditional_formatting',
+      description:
+        'Clear conditional formatting: by cfId, overlapping range, or all rules on the sheet (all:true)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range — clear rules overlapping this range',
+          },
+          cfId: {
+            type: 'string',
+            description: 'Exact rule id from get_conditional_formatting',
+          },
+          all: {
+            type: 'boolean',
+            description: 'If true, clear all rules on the active sheet',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_data_validations',
+      description:
+        'List data validation rules on a range (or whole active sheet if range omitted)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → all rules on active sheet',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_list_validation',
+      description:
+        'Set dropdown list data validation on a range (or selection)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          values: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Allowed list values',
+          },
+          allowBlank: {
+            type: 'boolean',
+            description: 'Default true',
+          },
+          showDropdown: {
+            type: 'boolean',
+            description: 'Default true',
+          },
+          error: {
+            type: 'string',
+            description: 'Optional error message when value is invalid',
+          },
+        },
+        required: ['values'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_number_validation',
+      description:
+        'Set numeric data validation on a range (or selection): between / greater_than / less_than',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+          op: {
+            type: 'string',
+            enum: ['between', 'greater_than', 'less_than'],
+            description: 'Comparison operator',
+          },
+          min: {
+            type: 'number',
+            description: 'Required for between (lower bound)',
+          },
+          max: {
+            type: 'number',
+            description: 'Required for between (upper bound)',
+          },
+          value: {
+            type: 'number',
+            description: 'Required for greater_than / less_than',
+          },
+          integer: {
+            type: 'boolean',
+            description: 'If true, only integers allowed (default false)',
+          },
+          allowBlank: {
+            type: 'boolean',
+            description: 'Default true',
+          },
+          error: {
+            type: 'string',
+            description: 'Optional error message when value is invalid',
+          },
+        },
+        required: ['op'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clear_data_validation',
+      description: 'Remove data validation from a range (or active selection)',
+      parameters: {
+        type: 'object',
+        properties: {
+          range: {
+            type: 'string',
+            description: 'A1 range; optional → active selection',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_formulas',
       description:
         'Read formula strings and calculated values from A1 range (or active selection). Prefer this over read_range when you need formulas.',
@@ -812,6 +1019,11 @@ export const WRITE_TOOL_NAMES = new Set([
   'create_filter',
   'remove_filter',
   'set_column_filter',
+  'add_conditional_highlight',
+  'clear_conditional_formatting',
+  'set_list_validation',
+  'set_number_validation',
+  'clear_data_validation',
   'replace_in_sheet',
   'insert_image',
   'replace_text',
@@ -831,6 +1043,8 @@ const SHEET_READ = [
   'search_in_sheet',
   'activate_sheet',
   'get_filter',
+  'get_conditional_formatting',
+  'get_data_validations',
 ] as const
 
 const SHEET_WRITE = [
@@ -852,6 +1066,11 @@ const SHEET_WRITE = [
   'create_filter',
   'remove_filter',
   'set_column_filter',
+  'add_conditional_highlight',
+  'clear_conditional_formatting',
+  'set_list_validation',
+  'set_number_validation',
+  'clear_data_validation',
   'replace_in_sheet',
   'insert_image',
 ] as const

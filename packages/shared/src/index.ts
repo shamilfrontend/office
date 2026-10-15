@@ -15,3 +15,14 @@ export {
   type Plan,
   type PlanTodo,
 } from './plan'
+
+export {
+  adjustFormulaRefs,
+  collectFormulaCells,
+  colLettersToIndex,
+  indexToColLetters,
+  mergePlanTodos,
+  normalizePlanStatus,
+  type PlanState,
+  type PlanToolTodo,
+} from './a1'

@@ -15,7 +15,6 @@ import {
 import {
   a1FromRowCol,
   a1Range,
-  colLettersToIndex,
   estimateA1Area,
   getActiveWorkbook,
   getDocActiveOffsets,
@@ -32,7 +31,13 @@ import {
 } from './selection'
 import type { DocParagraph, UniverApi, UniverDocument } from './useUniver'
 
-import { WRITE_TOOL_NAMES } from '@office/shared'
+import {
+  adjustFormulaRefs,
+  collectFormulaCells,
+  mergePlanTodos,
+  normalizePlanStatus,
+  WRITE_TOOL_NAMES,
+} from '@office/shared'
 
 export {
   OFFICE_TOOLS,
@@ -40,15 +45,6 @@ export {
   toolsForMode,
   type ChatMode,
 } from '@office/shared'
-
-function normalizePlanStatus(status: string): string {
-  const s = status.trim().toLowerCase()
-  if (s === 'done' || s === 'complete' || s === 'completed' || s === 'x') return 'completed'
-  if (s === 'pending' || s === 'todo' || s === 'open' || s === '') return 'pending'
-  if (s === 'in_progress' || s === 'doing' || s === 'active') return 'in_progress'
-  if (s === 'cancelled' || s === 'canceled' || s === 'skipped') return 'cancelled'
-  return s
-}
 
 const READ_MAX_ROWS = 80
 const READ_MAX_COLS = 40
@@ -277,23 +273,6 @@ export function describeImpact(
     return { title, detail: `колонка ${col}, ${values} значений` }
   }
   return { title, detail: '' }
-}
-
-/** Shift relative A1 refs in a formula by dRow/dCol (absolute $ refs stay put). */
-function adjustFormulaRefs(formula: string, dRow: number, dCol: number): string {
-  if (!dRow && !dCol) return formula
-  return formula.replace(
-    /(^|[^A-Za-z0-9_])(\$?)([A-Za-z]+)(\$?)(\d+)\b/g,
-    (full, prefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
-      let c = colLettersToIndex(col)
-      let r = Number(row) - 1
-      if (!Number.isFinite(c) || c < 0 || !Number.isFinite(r) || r < 0) return full
-      if (!colAbs) c += dCol
-      if (!rowAbs) r += dRow
-      if (c < 0 || r < 0) return full
-      return `${prefix}${colAbs}${indexToColLetters(c)}${rowAbs}${r + 1}`
-    },
-  )
 }
 
 function mapBorderType(value: string): BorderType | null {
@@ -635,20 +614,7 @@ export async function runOfficeTool(
     if (!todos?.length) {
       return JSON.stringify({ error: 'todos required (non-empty array)' })
     }
-    const next = {
-      ...ctx.plan,
-      todos: ctx.plan.todos.map((t, i) => {
-        const byId = todos.find((x) => x.id != null && String(x.id) === String(t.id))
-        const byIndex = byId ? undefined : todos[i]
-        const u = byId ?? byIndex
-        if (!u) return t
-        return {
-          ...t,
-          ...(u.content != null ? { content: String(u.content) } : {}),
-          ...(u.status != null ? { status: normalizePlanStatus(String(u.status)) } : {}),
-        }
-      }),
-    }
+    const next = mergePlanTodos(ctx.plan, todos)
     ctx.setPlan(next)
     return JSON.stringify({ ok: true, plan: next })
   }
@@ -1261,24 +1227,7 @@ export async function runOfficeTool(
           startCol = parsed.col
         }
 
-        const cells: Array<{ row: number; col: number; formula: string }> = []
-        const dense: string[][] = []
-        let denseOk = true
-        for (let r = 0; r < numRows; r++) {
-          const row = Array.isArray(formulas[r]) ? formulas[r] : []
-          const denseRow: string[] = []
-          for (let c = 0; c < numCols; c++) {
-            const raw = row[c] == null ? '' : String(row[c]).trim()
-            if (!raw || raw === '=') {
-              denseOk = false
-              continue
-            }
-            const formula = raw.startsWith('=') ? raw : `=${raw}`
-            cells.push({ row: startRow + r, col: startCol + c, formula })
-            denseRow.push(formula)
-          }
-          if (denseOk) dense.push(denseRow)
-        }
+        const cells = collectFormulaCells(formulas, startRow, startCol)
         if (!cells.length) {
           return JSON.stringify({
             error: 'no valid formulas in matrix',
@@ -1286,9 +1235,16 @@ export async function runOfficeTool(
           })
         }
 
+        const denseOk = cells.length === numRows * numCols
         const written = a1Range(startRow, startCol, numRows, numCols)
         try {
-          if (denseOk && dense.length === numRows && dense.every((row) => row.length === numCols)) {
+          if (denseOk) {
+            const dense: string[][] = Array.from({ length: numRows }, (_, r) =>
+              Array.from({ length: numCols }, (_, c) => {
+                const hit = cells.find((cell) => cell.row === startRow + r && cell.col === startCol + c)
+                return hit?.formula ?? ''
+              }),
+            )
             sheet.getRange(startRow, startCol, numRows, numCols).setFormulas(dense)
           } else {
             for (const cell of cells) {
@@ -1296,7 +1252,6 @@ export async function runOfficeTool(
             }
           }
         } catch (writeError) {
-          // Fallback cell-by-cell if bulk write rejects a formula
           for (const cell of cells) {
             try {
               sheet.getRange(cell.row, cell.col, 1, 1).setFormulas([[cell.formula]])

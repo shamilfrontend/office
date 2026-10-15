@@ -1,124 +1,124 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { api } from '@/api/client'
-import { uiConfirm } from '@/composables/useConfirm'
-import { useAuthStore } from '@/stores/auth'
-import { useTheme, type ThemePreference } from '@/composables/useTheme'
-import { useAiToolPermissions } from '@/composables/useAiToolPermissions'
+import { onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { api } from '@/api/client';
+import { uiConfirm } from '@/composables/useConfirm';
+import { useAuthStore } from '@/stores/auth';
+import { useTheme, type ThemePreference } from '@/composables/useTheme';
+import { useAiToolPermissions } from '@/composables/useAiToolPermissions';
 
-const auth = useAuthStore()
-const router = useRouter()
-const { preference: theme, setTheme } = useTheme()
+const auth = useAuthStore();
+const router = useRouter();
+const { preference: theme, setTheme } = useTheme();
 const {
   permissions: aiPermissions,
   categories: aiPermissionCategories,
   setCategoryAllowed,
-} = useAiToolPermissions()
+} = useAiToolPermissions();
 const providers = ref<
   Array<{
-    id: string
-    provider: string
-    baseUrl: string
-    model: string | null
-    enabled: boolean
-    hasApiKey: boolean
+    id: string;
+    provider: string;
+    baseUrl: string;
+    model: string | null;
+    enabled: boolean;
+    hasApiKey: boolean;
   }>
->([])
+>([]);
 const form = reactive({
   id: '' as string | undefined,
   provider: 'DEEPSEEK',
   baseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',
   hasApiKey: false,
-})
-const showProviderForm = ref(false)
-const status = ref('')
+});
+const showProviderForm = ref(false);
+const status = ref('');
 const themeOptions: Array<{ value: ThemePreference; label: string }> = [
   { value: 'system', label: 'Системная' },
   { value: 'dark', label: 'Тёмная' },
   { value: 'light', label: 'Светлая' },
-]
+];
 
 async function load() {
-  providers.value = await api.listProviders()
+  providers.value = await api.listProviders();
 }
 
 function close() {
-  auth.closeSettings()
+  auth.closeSettings();
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') close()
+  if (e.key === 'Escape') close();
 }
 
 function resetForm() {
-  form.id = undefined
-  form.provider = 'DEEPSEEK'
-  form.baseUrl = 'https://api.deepseek.com/v1'
-  form.apiKey = ''
-  form.hasApiKey = false
+  form.id = undefined;
+  form.provider = 'DEEPSEEK';
+  form.baseUrl = 'https://api.deepseek.com/v1';
+  form.apiKey = '';
+  form.hasApiKey = false;
 }
 
 function openProviderForm() {
-  resetForm()
-  showProviderForm.value = true
-  status.value = ''
+  resetForm();
+  showProviderForm.value = true;
+  status.value = '';
 }
 
 function editProvider(id: string) {
-  const provider = providers.value.find((p) => p.id === id)
-  if (!provider) return
-  form.id = provider.id
-  form.provider = provider.provider
-  form.baseUrl = provider.baseUrl
-  form.apiKey = ''
-  form.hasApiKey = provider.hasApiKey
-  showProviderForm.value = true
-  status.value = ''
+  const provider = providers.value.find((p) => p.id === id);
+  if (!provider) return;
+  form.id = provider.id;
+  form.provider = provider.provider;
+  form.baseUrl = provider.baseUrl;
+  form.apiKey = '';
+  form.hasApiKey = provider.hasApiKey;
+  showProviderForm.value = true;
+  status.value = '';
 }
 
 function cancelProviderForm() {
-  showProviderForm.value = false
-  resetForm()
-  status.value = ''
+  showProviderForm.value = false;
+  resetForm();
+  status.value = '';
 }
 
 async function onProviderTypeChange() {
-  if (form.id) return
-  const defaults = await api.aiDefaults()
-  const d = defaults[form.provider] as { baseUrl: string }
-  form.baseUrl = d.baseUrl
-  status.value = ''
+  if (form.id) return;
+  const defaults = await api.aiDefaults();
+  const d = defaults[form.provider] as { baseUrl: string };
+  form.baseUrl = d.baseUrl;
+  status.value = '';
 }
 
 onMounted(() => {
-  void load()
-  window.addEventListener('keydown', onKeydown)
-})
+  void load();
+  window.addEventListener('keydown', onKeydown);
+});
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
-})
+  window.removeEventListener('keydown', onKeydown);
+});
 
 async function test() {
-  status.value = 'Проверка…'
+  status.value = 'Проверка…';
   try {
     if (form.id && !form.apiKey) {
-      const res = await api.listProviderModels(form.id)
-      status.value = `OK · ${res.models.length} моделей доступно`
-      return
+      const res = await api.listProviderModels(form.id);
+      status.value = `OK · ${res.models.length} моделей доступно`;
+      return;
     }
     const res = await api.testProvider({
       provider: form.provider,
       baseUrl: form.baseUrl,
       apiKey: form.apiKey || undefined,
-    })
+    });
     status.value = res.ok
       ? `OK · ${res.models.length} моделей доступно`
-      : res.error || 'Ошибка'
+      : res.error || 'Ошибка';
   } catch (e) {
-    status.value = e instanceof Error ? e.message : 'Ошибка'
+    status.value = e instanceof Error ? e.message : 'Ошибка';
   }
 }
 
@@ -130,31 +130,31 @@ async function save() {
       baseUrl: form.baseUrl,
       apiKey: form.apiKey || undefined,
       enabled: true,
-    })
-    resetForm()
-    status.value = ''
-    showProviderForm.value = false
-    await auth.refreshMe()
-    await load()
+    });
+    resetForm();
+    status.value = '';
+    showProviderForm.value = false;
+    await auth.refreshMe();
+    await load();
   } catch (e) {
-    status.value = e instanceof Error ? e.message : 'Ошибка сохранения'
+    status.value = e instanceof Error ? e.message : 'Ошибка сохранения';
   }
 }
 
 async function remove(id: string) {
-  const provider = providers.value.find((p) => p.id === id)
+  const provider = providers.value.find((p) => p.id === id);
   const ok = await uiConfirm({
     title: 'Удалить провайдер?',
     message: provider
       ? `Провайдер ${provider.provider} будет удалён.`
       : 'Провайдер будет удалён.',
     confirmLabel: 'Удалить',
-  })
-  if (!ok) return
-  await api.deleteProvider(id)
-  if (form.id === id) cancelProviderForm()
-  await auth.refreshMe()
-  await load()
+  });
+  if (!ok) return;
+  await api.deleteProvider(id);
+  if (form.id === id) cancelProviderForm();
+  await auth.refreshMe();
+  await load();
 }
 
 async function logout() {
@@ -162,20 +162,32 @@ async function logout() {
     title: 'Выйти из аккаунта?',
     message: 'Сессия будет завершена на этом устройстве.',
     confirmLabel: 'Выйти',
-  })
-  if (!ok) return
-  auth.closeSettings()
-  await auth.logout()
-  await router.push('/')
+  });
+  if (!ok) return;
+  auth.closeSettings();
+  await auth.logout();
+  await router.push('/');
 }
 </script>
 
 <template>
   <div class="ui-overlay overlay" @click.self="close">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+    >
       <header class="head">
         <h2 id="settings-title">Настройки</h2>
-        <button type="button" class="ui-btn close" aria-label="Закрыть" @click="close">×</button>
+        <button
+          type="button"
+          class="ui-btn close"
+          aria-label="Закрыть"
+          @click="close"
+        >
+          ×
+        </button>
       </header>
 
       <div class="body">
@@ -186,7 +198,9 @@ async function logout() {
               <img v-if="auth.me?.avatarUrl" :src="auth.me.avatarUrl" alt="" />
               <div>
                 <div>{{ auth.me?.displayName }}</div>
-                <div class="muted">{{ auth.me?.email }}</div>
+                <div class="muted">
+                  {{ auth.me?.email }}
+                </div>
               </div>
             </div>
             <button type="button" class="ui-btn" @click="logout">Выйти</button>
@@ -199,17 +213,31 @@ async function logout() {
             <li v-for="p in providers" :key="p.id">
               <div>
                 <strong>{{ p.provider }}</strong>
-                <div class="muted">{{ p.baseUrl }}</div>
+                <div class="muted">
+                  {{ p.baseUrl }}
+                </div>
                 <div v-if="p.hasApiKey" class="muted">Ключ сохранён</div>
               </div>
               <div class="row">
-                <button type="button" class="ui-btn" @click="editProvider(p.id)">Изменить</button>
-                <button type="button" class="ui-btn" @click="remove(p.id)">Удалить</button>
+                <button
+                  type="button"
+                  class="ui-btn"
+                  @click="editProvider(p.id)"
+                >
+                  Изменить
+                </button>
+                <button type="button" class="ui-btn" @click="remove(p.id)">
+                  Удалить
+                </button>
               </div>
             </li>
           </ul>
           <div v-if="!showProviderForm" class="row">
-            <button type="button" class="ui-btn ui-btn--primary" @click="openProviderForm">
+            <button
+              type="button"
+              class="ui-btn ui-btn--primary"
+              @click="openProviderForm"
+            >
               Добавить провайдер
             </button>
           </div>
@@ -244,11 +272,27 @@ async function logout() {
               />
             </label>
             <div class="row">
-              <button type="button" class="ui-btn" @click="test">Проверить</button>
-              <button type="button" class="ui-btn ui-btn--primary" @click="save">Сохранить</button>
-              <button type="button" class="ui-btn ui-btn--ghost" @click="cancelProviderForm">Отмена</button>
+              <button type="button" class="ui-btn" @click="test">
+                Проверить
+              </button>
+              <button
+                type="button"
+                class="ui-btn ui-btn--primary"
+                @click="save"
+              >
+                Сохранить
+              </button>
+              <button
+                type="button"
+                class="ui-btn ui-btn--ghost"
+                @click="cancelProviderForm"
+              >
+                Отмена
+              </button>
             </div>
-            <p v-if="status" class="muted">{{ status }}</p>
+            <p v-if="status" class="muted">
+              {{ status }}
+            </p>
           </div>
         </section>
 

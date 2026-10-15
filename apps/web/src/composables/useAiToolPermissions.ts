@@ -1,24 +1,21 @@
-import { reactive } from 'vue'
+import { reactive } from 'vue';
 
 export type AiPermissionCategory =
-  | 'sheetData'
-  | 'sheetFormat'
-  | 'sheetStructure'
-  | 'docEdits'
+  'sheetData' | 'sheetFormat' | 'sheetStructure' | 'docEdits';
 
 export type AiPermissionCategoryMeta = {
-  id: AiPermissionCategory
-  label: string
-}
+  id: AiPermissionCategory;
+  label: string;
+};
 
-const STORAGE_KEY = 'office_ai_tool_permissions'
+const STORAGE_KEY = 'office_ai_tool_permissions';
 
 export const AI_PERMISSION_CATEGORIES: AiPermissionCategoryMeta[] = [
   { id: 'sheetData', label: 'Данные в таблице' },
   { id: 'sheetFormat', label: 'Форматирование таблицы' },
   { id: 'sheetStructure', label: 'Структура листов' },
   { id: 'docEdits', label: 'Правки в документах' },
-]
+];
 
 const TOOL_TO_CATEGORY: Record<string, AiPermissionCategory> = {
   set_cells: 'sheetData',
@@ -53,9 +50,9 @@ const TOOL_TO_CATEGORY: Record<string, AiPermissionCategory> = {
   set_heading: 'docEdits',
   set_list: 'docEdits',
   format_text: 'docEdits',
-}
+};
 
-type PermissionsState = Record<AiPermissionCategory, boolean>
+type PermissionsState = Record<AiPermissionCategory, boolean>;
 
 function defaultPermissions(): PermissionsState {
   return {
@@ -63,52 +60,55 @@ function defaultPermissions(): PermissionsState {
     sheetFormat: false,
     sheetStructure: false,
     docEdits: false,
-  }
+  };
 }
 
 function readStored(): PermissionsState {
-  const next = defaultPermissions()
+  const next = defaultPermissions();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return next
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return next;
     const parsed = JSON.parse(raw) as Partial<
       Record<AiPermissionCategory | 'deleteSheet', unknown>
-    >
-    for (const { id } of AI_PERMISSION_CATEGORIES) {
-      if (typeof parsed[id] === 'boolean') next[id] = parsed[id]
-    }
+    >;
+    AI_PERMISSION_CATEGORIES.forEach(({ id }) => {
+      if (typeof parsed[id] === 'boolean') next[id] = parsed[id];
+    });
     // migrate legacy deleteSheet → sheetStructure
     if (
       typeof parsed.sheetStructure !== 'boolean' &&
       parsed.deleteSheet === true
     ) {
-      next.sheetStructure = true
+      next.sheetStructure = true;
     }
   } catch {
     /* ignore */
   }
-  return next
+  return next;
 }
 
 function persist(state: PermissionsState) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
     /* ignore */
   }
 }
 
-const permissions = reactive<PermissionsState>(readStored())
+const permissions = reactive<PermissionsState>(readStored());
 
 export function isToolAutoAllowed(name: string): boolean {
-  const category = TOOL_TO_CATEGORY[name]
-  if (!category) return false
-  return permissions[category]
+  const category = TOOL_TO_CATEGORY[name];
+  if (!category) return false;
+  return permissions[category];
 }
 
-export function setCategoryAllowed(category: AiPermissionCategory, enabled: boolean) {
-  permissions[category] = enabled
-  persist(permissions)
+export function setCategoryAllowed(
+  category: AiPermissionCategory,
+  enabled: boolean,
+) {
+  permissions[category] = enabled;
+  persist(permissions);
 }
 
 export function useAiToolPermissions() {
@@ -117,5 +117,5 @@ export function useAiToolPermissions() {
     categories: AI_PERMISSION_CATEGORIES,
     isToolAutoAllowed,
     setCategoryAllowed,
-  }
+  };
 }

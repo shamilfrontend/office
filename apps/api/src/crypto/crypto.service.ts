@@ -7,7 +7,8 @@ export class CryptoService {
   private readonly key: Buffer;
 
   constructor(config: ConfigService) {
-    const raw = config.get<string>('ENCRYPTION_KEY') ?? 'dev-encryption-key-32-chars!!';
+    const raw =
+      config.get<string>('ENCRYPTION_KEY') ?? 'dev-encryption-key-32-chars!!';
     this.key = crypto.createHash('sha256').update(raw).digest();
   }
 

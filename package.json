@@ -11,6 +11,25 @@
     "build:web": "npm run build:shared && npm run build --prefix apps/web",
     "build:api": "npm run build:shared && npm run build --prefix apps/api",
     "db:migrate": "npm run prisma:migrate --prefix apps/api",
-    "db:generate": "npm run prisma:generate --prefix apps/api"
+    "db:generate": "npm run prisma:generate --prefix apps/api",
+    "lint": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\"",
+    "lint:fix": "eslint \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue}\" \"packages/shared/src/**/*.{ts,js}\" --fix",
+    "format": "prettier --write \"apps/api/src/**/*.{ts,js}\" \"apps/web/src/**/*.{ts,vue,css,scss}\" \"packages/shared/src/**/*.{ts,js}\""
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prettier": "^5.2.2",
+    "eslint-plugin-vue": "^10.0.0",
+    "globals": "^17.0.0",
+    "prettier": "^3.4.2",
+    "typescript": "~5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vue-eslint-parser": "^10.0.0"
   }
 }

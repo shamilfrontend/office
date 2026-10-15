@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import AppLogo from '@/components/AppLogo.vue'
-import { useAuthStore } from '@/stores/auth'
+import { onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import AppLogo from '@/components/AppLogo.vue';
+import { useAuthStore } from '@/stores/auth';
 
-const route = useRoute()
-const router = useRouter()
-const auth = useAuthStore()
+const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
 
 onMounted(async () => {
-  await auth.refreshMe()
+  await auth.refreshMe();
   if (route.query.onboarding === '1') {
-    auth.showOnboarding = true
+    auth.showOnboarding = true;
   } else {
-    auth.openOnboardingIfNeeded()
+    auth.openOnboardingIfNeeded();
   }
-  await router.replace('/home')
-})
+  await router.replace('/home');
+});
 </script>
 
 <template>

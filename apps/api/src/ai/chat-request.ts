@@ -51,11 +51,14 @@ function messageContentChars(
   let n = 0;
   if (typeof msg.content === 'string') n += msg.content.length;
   if (msg.role === 'assistant' && 'tool_calls' in msg && msg.tool_calls) {
-    for (const tc of msg.tool_calls) {
-      if (tc.type === 'function' && typeof tc.function?.arguments === 'string') {
+    msg.tool_calls.forEach((tc) => {
+      if (
+        tc.type === 'function' &&
+        typeof tc.function?.arguments === 'string'
+      ) {
         n += tc.function.arguments.length;
       }
-    }
+    });
   }
   return n;
 }
@@ -75,13 +78,13 @@ function softTrimMessages(
 
   const turns: OpenAI.Chat.Completions.ChatCompletionMessageParam[][] = [];
   let current: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  for (const msg of messages) {
+  messages.forEach((msg) => {
     if (msg.role === 'user' && current.length) {
       turns.push(current);
       current = [];
     }
     current.push(msg);
-  }
+  });
   if (current.length) turns.push(current);
 
   let dropped = 0;
@@ -108,30 +111,30 @@ function sanitizeToolCalls(
   raw: unknown,
 ): OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const out: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
+  const out = raw.reduce<
+    OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]
+  >((acc, item) => {
+    if (!item || typeof item !== 'object') return acc;
     const tc = item as Record<string, unknown>;
     const fn = tc.function;
-    if (!fn || typeof fn !== 'object') continue;
+    if (!fn || typeof fn !== 'object') return acc;
     const f = fn as Record<string, unknown>;
     const name = typeof f.name === 'string' ? f.name : '';
-    if (!name || !ALL_TOOL_NAMES.has(name)) continue;
+    if (!name || !ALL_TOOL_NAMES.has(name)) return acc;
     const id =
-      typeof tc.id === 'string' && tc.id.trim()
-        ? tc.id
-        : `call_${out.length}`;
+      typeof tc.id === 'string' && tc.id.trim() ? tc.id : `call_${acc.length}`;
     let args =
       typeof f.arguments === 'string'
         ? f.arguments
         : JSON.stringify(f.arguments ?? {});
     args = softClipContent(args, MAX_ARGS_CHARS);
-    out.push({
+    acc.push({
       id,
       type: 'function',
       function: { name, arguments: args },
     });
-  }
+    return acc;
+  }, []);
   return out.length ? out : undefined;
 }
 
@@ -145,9 +148,7 @@ function sanitizeMessage(
   const msg = raw as Record<string, unknown>;
   const role = asString(msg.role, `messages[${index}].role`);
   if (!ROLES.has(role)) {
-    throw new BadRequestException(
-      `Недопустимая роль сообщения: ${role}`,
-    );
+    throw new BadRequestException(`Недопустимая роль сообщения: ${role}`);
   }
 
   let content = '';
@@ -180,11 +181,11 @@ function sanitizeMessage(
   }
 
   if (role === 'assistant') {
-    const tool_calls = sanitizeToolCalls(msg.tool_calls);
+    const toolCalls = sanitizeToolCalls(msg.tool_calls);
     return {
       role: 'assistant',
       content,
-      ...(tool_calls ? { tool_calls } : {}),
+      ...(toolCalls ? { tool_calls: toolCalls } : {}),
     };
   }
 
@@ -203,9 +204,7 @@ export function sanitizeChatRequest(body: unknown): SanitizedChatRequest {
 
   const modeRaw = b.mode;
   if (typeof modeRaw !== 'string' || !MODES.has(modeRaw as ChatMode)) {
-    throw new BadRequestException(
-      'mode должен быть chat, plan или agent',
-    );
+    throw new BadRequestException('mode должен быть chat, plan или agent');
   }
   const mode = modeRaw as ChatMode;
 
@@ -227,15 +226,12 @@ export function sanitizeChatRequest(body: unknown): SanitizedChatRequest {
 
   const tools = toolsForMode(mode, buildingPlan, hasDocument, docType);
 
-  let tool_choice: 'auto' | 'none' | 'required' = 'auto';
-  if (
-    typeof b.tool_choice === 'string' &&
-    TOOL_CHOICES.has(b.tool_choice)
-  ) {
-    tool_choice = b.tool_choice as 'auto' | 'none' | 'required';
+  let toolChoice: 'auto' | 'none' | 'required' = 'auto';
+  if (typeof b.tool_choice === 'string' && TOOL_CHOICES.has(b.tool_choice)) {
+    toolChoice = b.tool_choice as 'auto' | 'none' | 'required';
   }
   if (!tools.length) {
-    tool_choice = 'none';
+    toolChoice = 'none';
   }
 
   const providerId =
@@ -243,9 +239,7 @@ export function sanitizeChatRequest(body: unknown): SanitizedChatRequest {
       ? b.providerId.trim()
       : undefined;
   const model =
-    typeof b.model === 'string' && b.model.trim()
-      ? b.model.trim()
-      : undefined;
+    typeof b.model === 'string' && b.model.trim() ? b.model.trim() : undefined;
 
   return {
     providerId,
@@ -256,6 +250,6 @@ export function sanitizeChatRequest(body: unknown): SanitizedChatRequest {
     buildingPlan,
     messages,
     tools,
-    tool_choice,
+    tool_choice: toolChoice,
   };
 }

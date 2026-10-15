@@ -1,4 +1,4 @@
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -8,47 +8,47 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.body instanceof FormData ? {} : JSON_HEADERS),
       ...init?.headers,
     },
-  })
+  });
   if (!res.ok) {
-    let message = res.statusText
+    let message = res.statusText;
     try {
-      const data = (await res.json()) as { message?: string | string[] }
+      const data = (await res.json()) as { message?: string | string[] };
       message = Array.isArray(data.message)
         ? data.message.join(', ')
-        : data.message || message
+        : data.message || message;
     } catch {
       /* ignore */
     }
-    throw new Error(message)
+    throw new Error(message);
   }
-  if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
 }
 
 export type Me = {
-  id: string
-  email: string | null
-  displayName: string | null
-  avatarUrl: string | null
-  onboardingSkipped: boolean
-  hasAiProvider: boolean
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  onboardingSkipped: boolean;
+  hasAiProvider: boolean;
   providers: Array<{
-    id: string
-    provider: string
-    baseUrl: string
-    model: string | null
-    enabled: boolean
-  }>
-}
+    id: string;
+    provider: string;
+    baseUrl: string;
+    model: string | null;
+    enabled: boolean;
+  }>;
+};
 
 export type DocItem = {
-  id: string
-  name: string
-  type: 'SHEET' | 'DOC'
-  size: number
-  updatedAt: string
-  createdAt: string
-}
+  id: string;
+  name: string;
+  type: 'SHEET' | 'DOC';
+  size: number;
+  updatedAt: string;
+  createdAt: string;
+};
 
 export const api = {
   authConfig: () => request<{ yandexEnabled: boolean }>('/auth/config'),
@@ -80,10 +80,10 @@ export const api = {
   deleteFile: (id: string) =>
     request<{ ok: boolean }>(`/files/${id}`, { method: 'DELETE' }),
   uploadFile: async (file: File, type?: string) => {
-    const form = new FormData()
-    form.append('file', file)
-    if (type) form.append('type', type)
-    return request<DocItem>('/files/upload', { method: 'POST', body: form })
+    const form = new FormData();
+    form.append('file', file);
+    if (type) form.append('type', type);
+    return request<DocItem>('/files/upload', { method: 'POST', body: form });
   },
   downloadUrl: (
     id: string,
@@ -93,12 +93,12 @@ export const api = {
   listProviders: () =>
     request<
       Array<{
-        id: string
-        provider: string
-        baseUrl: string
-        model: string | null
-        enabled: boolean
-        hasApiKey: boolean
+        id: string;
+        provider: string;
+        baseUrl: string;
+        model: string | null;
+        enabled: boolean;
+        hasApiKey: boolean;
       }>
     >('/ai/providers'),
   upsertProvider: (body: Record<string, unknown>) =>
@@ -121,10 +121,10 @@ export const api = {
       `/ai/chats?open=0&documentId=${encodeURIComponent(documentId)}`,
     ),
   createChat: (body: {
-    mode?: string
-    providerId?: string
-    model?: string
-    documentId?: string
+    mode?: string;
+    providerId?: string;
+    model?: string;
+    documentId?: string;
   }) =>
     request<ChatRecord>('/ai/chats', {
       method: 'POST',
@@ -149,42 +149,42 @@ export const api = {
       body: JSON.stringify(body),
     }),
   extractAttachment: async (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
+    const form = new FormData();
+    form.append('file', file);
     return request<{ name: string; text: string }>('/ai/attachments/extract', {
       method: 'POST',
       body: form,
-    })
+    });
   },
-}
+};
 
 export type ChatMessageRecord = {
-  id: string
-  role: string
-  content: string
-  toolName: string | null
-  toolCallId: string | null
-  toolStatus: string | null
-  toolCallsJson: string | null
-  createdAt: string
-}
+  id: string;
+  role: string;
+  content: string;
+  toolName: string | null;
+  toolCallId: string | null;
+  toolStatus: string | null;
+  toolCallsJson: string | null;
+  createdAt: string;
+};
 
 export type ChatSummary = {
-  id: string
-  title: string
-  mode: string
-  providerId: string | null
-  model: string | null
-  documentId: string | null
-  planTitle: string | null
-  planMarkdown: string | null
-  planExecuted: boolean | null
-  pinnedOpen: boolean
-  sortOrder: number
-  createdAt: string
-  updatedAt: string
-}
+  id: string;
+  title: string;
+  mode: string;
+  providerId: string | null;
+  model: string | null;
+  documentId: string | null;
+  planTitle: string | null;
+  planMarkdown: string | null;
+  planExecuted: boolean | null;
+  pinnedOpen: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type ChatRecord = ChatSummary & {
-  messages: ChatMessageRecord[]
-}
+  messages: ChatMessageRecord[];
+};

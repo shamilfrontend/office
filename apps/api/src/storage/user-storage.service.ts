@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  ForbiddenException,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -80,16 +76,19 @@ export class UserStorageService implements OnModuleInit {
   private async dirSize(dir: string): Promise<number> {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
-      let total = 0;
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          total += await this.dirSize(full);
-        } else if (entry.isFile()) {
-          total += (await fs.stat(full)).size;
-        }
-      }
-      return total;
+      const sizes = await Promise.all(
+        entries.map(async (entry) => {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            return this.dirSize(full);
+          }
+          if (entry.isFile()) {
+            return (await fs.stat(full)).size;
+          }
+          return 0;
+        }),
+      );
+      return sizes.reduce((sum, size) => sum + size, 0);
     } catch {
       return 0;
     }

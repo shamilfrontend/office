@@ -10,10 +10,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
+import type { User } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import type { User } from '@prisma/client';
 
 @Controller('auth')
 export class AuthController {
@@ -34,14 +34,12 @@ export class AuthController {
   }
 
   @Get('yandex/callback')
-  async yandexCallback(
-    @Query('code') code: string,
-    @Res() res: Response,
-  ) {
+  async yandexCallback(@Query('code') code: string, @Res() res: Response) {
     if (!code) {
       throw new BadRequestException('Missing code');
     }
-    const frontend = this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5176';
+    const frontend =
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5176';
     try {
       const user = await this.auth.exchangeYandexCode(code);
       this.auth.issueSession(user, res);

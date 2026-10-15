@@ -1,283 +1,290 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { api } from '@/api/client'
-import AiChatPanel from '@/components/AiChatPanel.vue'
-import AppLogo from '@/components/AppLogo.vue'
-import { uiConfirm } from '@/composables/useConfirm'
-import { useAuthStore } from '@/stores/auth'
-import { useFileTabsStore } from '@/stores/fileTabs'
-import { formatSelectionContext } from '@/univer/selection'
-import { useUniverHost } from '@/univer/useUniver'
+import { computed, nextTick, ref, watch } from 'vue';
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
+import { api } from '@/api/client';
+import AiChatPanel from '@/components/AiChatPanel.vue';
+import AppLogo from '@/components/AppLogo.vue';
+import { uiConfirm } from '@/composables/useConfirm';
+import { useAuthStore } from '@/stores/auth';
+import { useFileTabsStore } from '@/stores/fileTabs';
+import { formatSelectionContext } from '@/univer/selection';
+import { useUniverHost } from '@/univer/useUniver';
 
-const route = useRoute()
-const router = useRouter()
-const auth = useAuthStore()
-const fileTabs = useFileTabsStore()
-const { container, api: univerApi, mountSheet, mountDoc, getSnapshot } =
-  useUniverHost()
+const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
+const fileTabs = useFileTabsStore();
+const {
+  container,
+  api: univerApi,
+  mountSheet,
+  mountDoc,
+  getSnapshot,
+} = useUniverHost();
 
-const docId = computed(() => String(route.params.id))
-const docName = ref('…')
-const docType = ref<'SHEET' | 'DOC'>('SHEET')
-const saveState = ref<'saved' | 'saving' | 'dirty'>('saved')
-const saveFeedback = ref<'idle' | 'saving' | 'saved'>('idle')
-const chatCollapsed = ref(sessionStorage.getItem('office_chat_collapsed') === '1')
-const checkpoint = ref<unknown>(null)
-const newMenuOpen = ref(false)
-const creating = ref(false)
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let saveFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-let loadedId = ''
-let loadSeq = 0
-let dirtyListenerBound = false
+const docId = computed(() => String(route.params.id));
+const docName = ref('…');
+const docType = ref<'SHEET' | 'DOC'>('SHEET');
+const saveState = ref<'saved' | 'saving' | 'dirty'>('saved');
+const saveFeedback = ref<'idle' | 'saving' | 'saved'>('idle');
+const chatCollapsed = ref(
+  sessionStorage.getItem('office_chat_collapsed') === '1',
+);
+const checkpoint = ref<unknown>(null);
+const newMenuOpen = ref(false);
+const creating = ref(false);
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+let loadedId = '';
+let loadSeq = 0;
+let dirtyListenerBound = false;
 
 const titleWidth = computed(() => {
-  const len = Math.max(docName.value.length, 8)
-  return `min(${Math.min(len, 40)}ch, 40vw)`
-})
+  const len = Math.max(docName.value.length, 8);
+  return `min(${Math.min(len, 40)}ch, 40vw)`;
+});
 
 async function flushSave() {
   if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
+    clearTimeout(saveTimer);
+    saveTimer = null;
   }
   if (saveState.value === 'dirty' || saveState.value === 'saving') {
-    await save()
+    await save();
   }
 }
 
 async function load(id: string) {
-  if (!id) return
-  const seq = ++loadSeq
+  if (!id) return;
+  loadSeq += 1;
+  const seq = loadSeq;
   if (loadedId && loadedId !== id) {
-    await flushSave()
+    await flushSave();
   }
-  if (seq !== loadSeq) return
-  checkpoint.value = null
-  clearSaveFeedback()
+  if (seq !== loadSeq) return;
+  checkpoint.value = null;
+  clearSaveFeedback();
   try {
-    const doc = await api.getFile(id)
-    if (seq !== loadSeq) return
-    docName.value = doc.name
-    docType.value = doc.type
-    fileTabs.syncActive(doc.id, { name: doc.name, type: doc.type })
-    await nextTick()
-    if (seq !== loadSeq) return
-    if (doc.type === 'SHEET') await mountSheet(doc.snapshot as object)
-    else await mountDoc(doc.snapshot as object)
-    if (seq !== loadSeq) return
-    loadedId = id
-    saveState.value = 'saved'
-    bindDirtyListeners()
+    const doc = await api.getFile(id);
+    if (seq !== loadSeq) return;
+    docName.value = doc.name;
+    docType.value = doc.type;
+    fileTabs.syncActive(doc.id, { name: doc.name, type: doc.type });
+    await nextTick();
+    if (seq !== loadSeq) return;
+    if (doc.type === 'SHEET') await mountSheet(doc.snapshot as object);
+    else await mountDoc(doc.snapshot as object);
+    if (seq !== loadSeq) return;
+    loadedId = id;
+    saveState.value = 'saved';
+    bindDirtyListeners();
   } catch (e) {
-    if (seq !== loadSeq) return
-    console.error(e)
-    const next = fileTabs.close(id)
-    if (next) await router.replace(`/edit/${next}`)
-    else await router.replace('/home')
+    if (seq !== loadSeq) return;
+    console.error(e);
+    const next = fileTabs.close(id);
+    if (next) await router.replace(`/edit/${next}`);
+    else await router.replace('/home');
   }
 }
 
 function clearSaveFeedback() {
   if (saveFeedbackTimer) {
-    clearTimeout(saveFeedbackTimer)
-    saveFeedbackTimer = null
+    clearTimeout(saveFeedbackTimer);
+    saveFeedbackTimer = null;
   }
-  saveFeedback.value = 'idle'
+  saveFeedback.value = 'idle';
 }
 
 function showSavedFeedback() {
-  saveFeedback.value = 'saved'
-  if (saveFeedbackTimer) clearTimeout(saveFeedbackTimer)
+  saveFeedback.value = 'saved';
+  if (saveFeedbackTimer) clearTimeout(saveFeedbackTimer);
   saveFeedbackTimer = setTimeout(() => {
-    saveFeedback.value = 'idle'
-    saveFeedbackTimer = null
-  }, 2000)
+    saveFeedback.value = 'idle';
+    saveFeedbackTimer = null;
+  }, 2000);
 }
 
 function markDirty() {
-  saveState.value = 'dirty'
-  scheduleSave()
+  saveState.value = 'dirty';
+  scheduleSave();
 }
 
 function bindDirtyListeners() {
-  const el = container.value
-  if (!el || dirtyListenerBound) return
-  dirtyListenerBound = true
-  el.addEventListener('keydown', markDirty, true)
-  el.addEventListener('pointerup', markDirty, true)
+  const el = container.value;
+  if (!el || dirtyListenerBound) return;
+  dirtyListenerBound = true;
+  el.addEventListener('keydown', markDirty, true);
+  el.addEventListener('pointerup', markDirty, true);
 }
 
 function scheduleSave() {
-  if (saveTimer) clearTimeout(saveTimer)
+  if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    void save()
-  }, 1200)
+    void save();
+  }, 1200);
 }
 
 function onDocumentChanged() {
-  markDirty()
+  markDirty();
 }
 
 async function confirmLeaveIfDirty(): Promise<boolean> {
-  if (saveState.value !== 'dirty' && saveState.value !== 'saving') return true
+  if (saveState.value !== 'dirty' && saveState.value !== 'saving') return true;
   const ok = await uiConfirm({
     title: 'Сохранить изменения?',
-    message:
-      'Документ ещё не сохранён. Без сохранения правки пропадут.',
+    message: 'Документ ещё не сохранён. Без сохранения правки пропадут.',
     confirmLabel: 'Сохранить',
     cancelLabel: 'Отмена',
     danger: false,
-  })
-  if (!ok) return false
-  await flushSave()
-  return saveState.value !== 'dirty'
+  });
+  if (!ok) return false;
+  await flushSave();
+  return saveState.value !== 'dirty';
 }
 
 async function save() {
-  const id = loadedId || docId.value
-  const snapshot = getSnapshot(docType.value)
-  if (!snapshot) return
-  saveState.value = 'saving'
+  const id = loadedId || docId.value;
+  const snapshot = getSnapshot(docType.value);
+  if (!snapshot) return;
+  saveState.value = 'saving';
   if (saveFeedbackTimer) {
-    clearTimeout(saveFeedbackTimer)
-    saveFeedbackTimer = null
+    clearTimeout(saveFeedbackTimer);
+    saveFeedbackTimer = null;
   }
-  saveFeedback.value = 'saving'
+  saveFeedback.value = 'saving';
   try {
-    await api.saveFile(id, snapshot, docName.value)
-    saveState.value = 'saved'
-    fileTabs.rename(id, docName.value)
-    showSavedFeedback()
+    await api.saveFile(id, snapshot, docName.value);
+    saveState.value = 'saved';
+    fileTabs.rename(id, docName.value);
+    showSavedFeedback();
   } catch (e) {
-    saveState.value = 'dirty'
-    saveFeedback.value = 'idle'
-    console.error(e)
+    saveState.value = 'dirty';
+    saveFeedback.value = 'idle';
+    console.error(e);
   }
 }
 
 function onTitleChange() {
-  fileTabs.rename(docId.value, docName.value)
-  markDirty()
+  fileTabs.rename(docId.value, docName.value);
+  markDirty();
 }
 
 async function download(format: 'json' | 'csv' | 'xlsx' | 'docx') {
-  await save()
+  await save();
   if (format === 'xlsx' && docType.value === 'SHEET') {
-    const snapshot = getSnapshot('SHEET')
+    const snapshot = getSnapshot('SHEET');
     if (!snapshot) {
-      alert('Нет данных таблицы для скачивания')
-      return
+      alert('Нет данных таблицы для скачивания');
+      return;
     }
     try {
-      const { downloadWorkbookXlsx } = await import('@/univer/excelImport')
-      await downloadWorkbookXlsx(snapshot, docName.value || 'workbook')
+      const { downloadWorkbookXlsx } = await import('@/univer/excelImport');
+      await downloadWorkbookXlsx(snapshot, docName.value || 'workbook');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Ошибка экспорта Excel')
+      alert(err instanceof Error ? err.message : 'Ошибка экспорта Excel');
     }
-    return
+    return;
   }
-  window.open(api.downloadUrl(docId.value, format), '_blank')
+  window.open(api.downloadUrl(docId.value, format), '_blank');
 }
 
 function toggleChat() {
-  chatCollapsed.value = !chatCollapsed.value
+  chatCollapsed.value = !chatCollapsed.value;
   sessionStorage.setItem(
     'office_chat_collapsed',
     chatCollapsed.value ? '1' : '0',
-  )
+  );
 }
 
 function takeCheckpoint() {
-  checkpoint.value = getSnapshot(docType.value)
+  checkpoint.value = getSnapshot(docType.value);
 }
 
 async function restoreCheckpoint() {
-  if (!checkpoint.value) return
+  if (!checkpoint.value) return;
   const ok = await uiConfirm({
     title: 'Откатить документ?',
     message:
       'Документ вернётся к контрольной точке. Текущие изменения после неё будут потеряны.',
     confirmLabel: 'Откатить',
-  })
-  if (!ok) return
-  if (docType.value === 'SHEET') await mountSheet(checkpoint.value as object)
-  else await mountDoc(checkpoint.value as object)
-  markDirty()
+  });
+  if (!ok) return;
+  if (docType.value === 'SHEET') await mountSheet(checkpoint.value as object);
+  else await mountDoc(checkpoint.value as object);
+  markDirty();
 }
 
 function selectionContext() {
-  return formatSelectionContext(univerApi.value, docType.value)
+  return formatSelectionContext(univerApi.value, docType.value);
 }
 
 async function switchTab(id: string) {
-  if (id === docId.value) return
-  await flushSave()
-  fileTabs.focus(id)
-  await router.push(`/edit/${id}`)
+  if (id === docId.value) return;
+  await flushSave();
+  fileTabs.focus(id);
+  await router.push(`/edit/${id}`);
 }
 
 async function closeTab(id: string, e?: Event) {
-  e?.stopPropagation()
-  if (id === docId.value) await flushSave()
-  const next = fileTabs.close(id)
+  e?.stopPropagation();
+  if (id === docId.value) await flushSave();
+  const next = fileTabs.close(id);
   if (!next) {
-    await router.push('/home')
-    return
+    await router.push('/home');
+    return;
   }
   if (id === docId.value) {
-    await router.push(`/edit/${next}`)
+    await router.push(`/edit/${next}`);
   }
 }
 
 function toggleNewMenu() {
-  newMenuOpen.value = !newMenuOpen.value
+  newMenuOpen.value = !newMenuOpen.value;
 }
 
 function closeNewMenu() {
-  newMenuOpen.value = false
+  newMenuOpen.value = false;
 }
 
 async function createAndOpen(type: 'SHEET' | 'DOC') {
-  if (creating.value) return
-  creating.value = true
-  newMenuOpen.value = false
+  if (creating.value) return;
+  creating.value = true;
+  newMenuOpen.value = false;
   try {
-    await flushSave()
-    const doc = await api.createFile(type)
-    fileTabs.open(doc)
-    await router.push(`/edit/${doc.id}`)
+    await flushSave();
+    const doc = await api.createFile(type);
+    fileTabs.open(doc);
+    await router.push(`/edit/${doc.id}`);
   } catch (e) {
-    console.error(e)
-    alert(e instanceof Error ? e.message : 'Не удалось создать файл')
+    console.error(e);
+    alert(e instanceof Error ? e.message : 'Не удалось создать файл');
   } finally {
-    creating.value = false
+    creating.value = false;
   }
 }
 
 async function openFromFiles() {
-  newMenuOpen.value = false
-  await router.push('/home')
+  newMenuOpen.value = false;
+  await router.push('/home');
 }
 
 onBeforeRouteLeave(async (to) => {
   if (String(to.path).startsWith('/edit/')) {
-    await flushSave()
-    return true
+    await flushSave();
+    return true;
   }
-  return confirmLeaveIfDirty()
-})
+  return confirmLeaveIfDirty();
+});
 
 watch(
   docId,
   (id) => {
-    if (!id || id === 'undefined') return
-    fileTabs.hydrateFromSession()
-    void load(id)
+    if (!id || id === 'undefined') return;
+    fileTabs.hydrateFromSession();
+    void load(id);
   },
   { immediate: true },
-)
+);
 </script>
 
 <template>
@@ -357,7 +364,11 @@ watch(
             />
           </svg>
         </button>
-        <button type="button" class="ui-btn ui-btn--ghost settings-btn" @click="auth.openSettings()">
+        <button
+          type="button"
+          class="ui-btn ui-btn--ghost settings-btn"
+          @click="auth.openSettings()"
+        >
           Настройки
         </button>
       </div>
@@ -382,9 +393,27 @@ watch(
             :class="tab.type === 'SHEET' ? 'sheet' : 'doc'"
             aria-hidden="true"
           >
-            <svg v-if="tab.type === 'SHEET'" viewBox="0 0 24 24" width="14" height="14">
-              <rect x="3" y="4" width="18" height="16" rx="2" fill="currentColor" opacity="0.2" />
-              <path d="M3 9h18M9 4v16" stroke="currentColor" stroke-width="1.5" fill="none" />
+            <svg
+              v-if="tab.type === 'SHEET'"
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+            >
+              <rect
+                x="3"
+                y="4"
+                width="18"
+                height="16"
+                rx="2"
+                fill="currentColor"
+                opacity="0.2"
+              />
+              <path
+                d="M3 9h18M9 4v16"
+                stroke="currentColor"
+                stroke-width="1.5"
+                fill="none"
+              />
             </svg>
             <svg v-else viewBox="0 0 24 24" width="14" height="14">
               <path
@@ -422,8 +451,16 @@ watch(
           >
             +
           </button>
-          <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
-            <button type="button" role="menuitem" @click="createAndOpen('SHEET')">
+          <div
+            v-if="newMenuOpen"
+            class="ui-dropdown file-tabs-menu"
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              @click="createAndOpen('SHEET')"
+            >
               Новая таблица
             </button>
             <button type="button" role="menuitem" @click="createAndOpen('DOC')">

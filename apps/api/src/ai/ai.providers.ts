@@ -1,8 +1,5 @@
 export type ProviderKind =
-  | 'DEEPSEEK'
-  | 'OLLAMA'
-  | 'LMSTUDIO'
-  | 'OPENAI_COMPATIBLE';
+  'DEEPSEEK' | 'OLLAMA' | 'LMSTUDIO' | 'OPENAI_COMPATIBLE';
 
 export const PROVIDER_DEFAULTS: Record<
   ProviderKind,

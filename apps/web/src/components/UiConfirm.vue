@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onUnmounted, ref, watch } from 'vue';
 import {
   confirmAccept,
   confirmCancel,
   useConfirmState,
-} from '@/composables/useConfirm'
+} from '@/composables/useConfirm';
 
-const state = useConfirmState()
-const confirmBtn = ref<HTMLButtonElement | null>(null)
+const state = useConfirmState();
+const confirmBtn = ref<HTMLButtonElement | null>(null);
 
 function onKeydown(e: KeyboardEvent) {
-  if (!state.open) return
+  if (!state.open) return;
   if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopImmediatePropagation()
-    confirmCancel()
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    confirmCancel();
   }
 }
 
@@ -22,18 +22,18 @@ watch(
   () => state.open,
   async (open) => {
     if (open) {
-      window.addEventListener('keydown', onKeydown, true)
-      await nextTick()
-      confirmBtn.value?.focus()
+      window.addEventListener('keydown', onKeydown, true);
+      await nextTick();
+      confirmBtn.value?.focus();
     } else {
-      window.removeEventListener('keydown', onKeydown, true)
+      window.removeEventListener('keydown', onKeydown, true);
     }
   },
-)
+);
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown, true)
-})
+  window.removeEventListener('keydown', onKeydown, true);
+});
 </script>
 
 <template>
@@ -49,7 +49,9 @@ onUnmounted(() => {
       aria-labelledby="ui-confirm-title"
       :aria-describedby="state.message ? 'ui-confirm-message' : undefined"
     >
-      <h2 id="ui-confirm-title">{{ state.title }}</h2>
+      <h2 id="ui-confirm-title">
+        {{ state.title }}
+      </h2>
       <p v-if="state.message" id="ui-confirm-message" class="message">
         {{ state.message }}
       </p>

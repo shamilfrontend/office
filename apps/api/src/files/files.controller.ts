@@ -56,7 +56,7 @@ export class FilesController {
   async download(
     @CurrentUser() user: User,
     @Param('id') id: string,
-    @Query('format') format: DownloadFormat = 'json',
+    @Query('format') format: DownloadFormat | undefined,
     @Res() res: Response,
   ) {
     const allowed: DownloadFormat[] = ['json', 'csv', 'xlsx', 'docx'];

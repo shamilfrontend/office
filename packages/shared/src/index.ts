@@ -6,7 +6,7 @@ export {
   type ChatMode,
   type DocType,
   type OfficeToolDef,
-} from './office-tools'
+} from './office-tools';
 
 export {
   parsePlanMarkdown,
@@ -14,7 +14,7 @@ export {
   planToMarkdown,
   type Plan,
   type PlanTodo,
-} from './plan'
+} from './plan';
 
 export {
   adjustFormulaRefs,
@@ -25,4 +25,4 @@ export {
   normalizePlanStatus,
   type PlanState,
   type PlanToolTodo,
-} from './a1'
+} from './a1';

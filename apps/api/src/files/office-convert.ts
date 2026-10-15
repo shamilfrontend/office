@@ -1,12 +1,7 @@
 import { randomUUID } from 'crypto';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-} from 'docx';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
 
 type CellValue = string | number | boolean;
 
@@ -38,7 +33,11 @@ type DocSnapshot = {
   body: {
     dataStream: string;
     paragraphs: Array<{ startIndex: number; paragraphId: string }>;
-    textRuns?: Array<{ st: number; ed: number; ts?: { bl?: number; fs?: number } }>;
+    textRuns?: Array<{
+      st: number;
+      ed: number;
+      ts?: { bl?: number; fs?: number };
+    }>;
   };
   documentStyle: {
     pageSize: { width: number; height: number };
@@ -54,9 +53,13 @@ function cellFromExcel(value: ExcelJS.CellValue): SheetCell | null {
 
   if (typeof value === 'object' && 'formula' in value) {
     const formula = String(value.formula ?? '').replace(/^=/, '');
-    const result = (value as { result?: unknown }).result;
+    const { result } = value as { result?: unknown };
     const cell: SheetCell = { f: formula };
-    if (typeof result === 'number' || typeof result === 'string' || typeof result === 'boolean') {
+    if (
+      typeof result === 'number' ||
+      typeof result === 'string' ||
+      typeof result === 'boolean'
+    ) {
       cell.v = result;
     }
     return cell;
@@ -73,8 +76,12 @@ function cellFromExcel(value: ExcelJS.CellValue): SheetCell | null {
   }
 
   if (typeof value === 'object' && 'result' in value) {
-    const result = (value as { result?: unknown }).result;
-    if (typeof result === 'number' || typeof result === 'string' || typeof result === 'boolean') {
+    const { result } = value as { result?: unknown };
+    if (
+      typeof result === 'number' ||
+      typeof result === 'string' ||
+      typeof result === 'boolean'
+    ) {
       return { v: result };
     }
     return null;
@@ -84,7 +91,11 @@ function cellFromExcel(value: ExcelJS.CellValue): SheetCell | null {
     return { v: value.toISOString() };
   }
 
-  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
+  if (
+    typeof value === 'number' ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
     return { v: value };
   }
 
@@ -156,17 +167,16 @@ export async function sheetToXlsx(
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const sheets = (snapshot.sheets ?? {}) as SheetSnapshot['sheets'];
-  const order =
-    (snapshot.sheetOrder as string[]) ?? Object.keys(sheets);
+  const order = (snapshot.sheetOrder as string[]) ?? Object.keys(sheets);
 
-  for (const sheetId of order) {
+  order.forEach((sheetId) => {
     const src = sheets[sheetId];
-    if (!src) continue;
+    if (!src) return;
     const ws = workbook.addWorksheet(src.name || 'Sheet1');
     const cellData = src.cellData ?? {};
-    for (const [rKey, row] of Object.entries(cellData)) {
+    Object.entries(cellData).forEach(([rKey, row]) => {
       const r = Number(rKey) + 1;
-      for (const [cKey, cell] of Object.entries(row)) {
+      Object.entries(row).forEach(([cKey, cell]) => {
         const c = Number(cKey) + 1;
         const target = ws.getCell(r, c);
         if (cell.f) {
@@ -177,9 +187,9 @@ export async function sheetToXlsx(
         } else if (cell.v != null) {
           target.value = cell.v;
         }
-      }
-    }
-  }
+      });
+    });
+  });
 
   if (!workbook.worksheets.length) {
     workbook.addWorksheet('Sheet1');
@@ -193,7 +203,7 @@ function buildDocBody(paragraphsText: string[]): DocSnapshot['body'] {
   const paragraphs: Array<{ startIndex: number; paragraphId: string }> = [];
   let dataStream = '';
 
-  for (let i = 0; i < paragraphsText.length; i++) {
+  for (let i = 0; i < paragraphsText.length; i += 1) {
     const text = paragraphsText[i] ?? '';
     dataStream += text;
     const breakIndex = dataStream.length;
@@ -250,9 +260,7 @@ export async function docxToDoc(
 export async function docToDocx(
   snapshot: Record<string, unknown>,
 ): Promise<Buffer> {
-  const body = snapshot.body as
-    | { dataStream?: string }
-    | undefined;
+  const body = snapshot.body as { dataStream?: string } | undefined;
   const raw = body?.dataStream ?? '';
   // Split on Univer paragraph markers; drop trailing section `\n`.
   const parts = raw

@@ -1,15 +1,15 @@
-export type ChatMode = 'chat' | 'plan' | 'agent'
-export type DocType = 'SHEET' | 'DOC'
+export type ChatMode = 'chat' | 'plan' | 'agent';
+export type DocType = 'SHEET' | 'DOC';
 
 /** OpenAI-compatible tool definition (no openai package dependency). */
 export type OfficeToolDef = {
-  type: 'function'
+  type: 'function';
   function: {
-    name: string
-    description: string
-    parameters: Record<string, unknown>
-  }
-}
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
 
 /** Single source of truth for AI office tool schemas (web + api). */
 export const OFFICE_TOOLS: OfficeToolDef[] = [
@@ -41,7 +41,8 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
         properties: {
           range: {
             type: 'string',
-            description: 'A1 notation, e.g. A1:C10. Optional: active selection.',
+            description:
+              'A1 notation, e.g. A1:C10. Optional: active selection.',
           },
         },
       },
@@ -51,7 +52,8 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
     type: 'function',
     function: {
       name: 'search_in_sheet',
-      description: 'Search text in used range of the active sheet; returns A1 hits',
+      description:
+        'Search text in used range of the active sheet; returns A1 hits',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string' } },
@@ -98,7 +100,8 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
     type: 'function',
     function: {
       name: 'insert_sheet',
-      description: 'Insert a new sheet (becomes active). Optional name and 0-based index.',
+      description:
+        'Insert a new sheet (becomes active). Optional name and 0-based index.',
       parameters: {
         type: 'object',
         properties: {
@@ -130,7 +133,8 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
     type: 'function',
     function: {
       name: 'delete_sheet',
-      description: 'Delete a sheet by name. If name omitted, deletes the active sheet.',
+      description:
+        'Delete a sheet by name. If name omitted, deletes the active sheet.',
       parameters: {
         type: 'object',
         properties: {
@@ -468,7 +472,8 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
         properties: {
           range: {
             type: 'string',
-            description: 'A1 notation, e.g. A1:C10. Optional: active selection.',
+            description:
+              'A1 notation, e.g. A1:C10. Optional: active selection.',
           },
         },
       },
@@ -833,16 +838,7 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
         properties: {
           style: {
             type: 'string',
-            enum: [
-              'normal',
-              'title',
-              'subtitle',
-              'h1',
-              'h2',
-              'h3',
-              'h4',
-              'h5',
-            ],
+            enum: ['normal', 'title', 'subtitle', 'h1', 'h2', 'h3', 'h4', 'h5'],
           },
           paragraphIndex: { type: 'number' },
         },
@@ -994,11 +990,11 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
       },
     },
   },
-]
+];
 
 export const ALL_TOOL_NAMES = new Set(
   OFFICE_TOOLS.map((t) => t.function.name).filter(Boolean),
-)
+);
 
 export const WRITE_TOOL_NAMES = new Set([
   'set_cells',
@@ -1033,7 +1029,7 @@ export const WRITE_TOOL_NAMES = new Set([
   'set_heading',
   'set_list',
   'format_text',
-])
+]);
 
 const SHEET_READ = [
   'get_workbook_outline',
@@ -1045,7 +1041,7 @@ const SHEET_READ = [
   'get_filter',
   'get_conditional_formatting',
   'get_data_validations',
-] as const
+] as const;
 
 const SHEET_WRITE = [
   'set_cells',
@@ -1073,14 +1069,14 @@ const SHEET_WRITE = [
   'clear_data_validation',
   'replace_in_sheet',
   'insert_image',
-] as const
+] as const;
 
 const DOC_READ = [
   'get_doc_outline',
   'get_selection',
   'read_document',
   'search_in_document',
-] as const
+] as const;
 
 const DOC_WRITE = [
   'replace_text',
@@ -1090,9 +1086,9 @@ const DOC_WRITE = [
   'set_heading',
   'set_list',
   'format_text',
-] as const
+] as const;
 
-const PLAN_TOOLS = ['create_plan', 'update_plan'] as const
+const PLAN_TOOLS = ['create_plan', 'update_plan'] as const;
 
 export function toolsForMode(
   mode: ChatMode,
@@ -1100,24 +1096,24 @@ export function toolsForMode(
   hasDocument = true,
   docType: DocType = 'SHEET',
 ): OfficeToolDef[] {
-  const read =
-    hasDocument && docType === 'SHEET'
-      ? [...SHEET_READ]
-      : hasDocument && docType === 'DOC'
-        ? [...DOC_READ]
-        : []
-  const write =
-    hasDocument && docType === 'SHEET'
-      ? [...SHEET_WRITE]
-      : hasDocument && docType === 'DOC'
-        ? [...DOC_WRITE]
-        : []
-  let names: string[] = []
-  if (mode === 'chat') names = [...read]
-  if (mode === 'plan') names = [...read, ...PLAN_TOOLS]
-  if (mode === 'agent') {
-    names = [...read, ...write]
-    if (buildingPlan) names.push('update_plan')
+  let read: string[] = [];
+  if (hasDocument && docType === 'SHEET') {
+    read = [...SHEET_READ];
+  } else if (hasDocument && docType === 'DOC') {
+    read = [...DOC_READ];
   }
-  return OFFICE_TOOLS.filter((t) => names.includes(t.function.name))
+  let write: string[] = [];
+  if (hasDocument && docType === 'SHEET') {
+    write = [...SHEET_WRITE];
+  } else if (hasDocument && docType === 'DOC') {
+    write = [...DOC_WRITE];
+  }
+  let names: string[] = [];
+  if (mode === 'chat') names = [...read];
+  if (mode === 'plan') names = [...read, ...PLAN_TOOLS];
+  if (mode === 'agent') {
+    names = [...read, ...write];
+    if (buildingPlan) names.push('update_plan');
+  }
+  return OFFICE_TOOLS.filter((t) => names.includes(t.function.name));
 }

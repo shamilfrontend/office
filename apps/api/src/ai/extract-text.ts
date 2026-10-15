@@ -15,7 +15,7 @@ export async function extractAttachmentText(
   else if (ext === 'pptx') text = await pptxToText(buffer);
   else if (ext === 'pdf') text = await pdfToText(buffer);
   else text = buffer.toString('utf8');
-  return text.replace(/\u0000/g, '').slice(0, MAX_CHARS);
+  return text.split('\0').join('').slice(0, MAX_CHARS);
 }
 
 async function xlsxToText(buffer: Buffer) {
@@ -61,20 +61,23 @@ async function pptxToText(buffer: Buffer) {
   const names = Object.keys(zip.files)
     .filter((name) => /ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort();
-  const slides: string[] = [];
-  for (const name of names) {
-    const xml = await zip.files[name].async('string');
-    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map(
-      (match) => match[1],
-    );
-    if (texts.length) slides.push(texts.join(' '));
-  }
+  const slides = (
+    await Promise.all(
+      names.map(async (name) => {
+        const xml = await zip.files[name].async('string');
+        const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map(
+          (match) => match[1],
+        );
+        return texts.length ? texts.join(' ') : null;
+      }),
+    )
+  ).filter((slide): slide is string => slide != null);
   return slides.join('\n\n');
 }
 
 async function pdfToText(buffer: Buffer) {
   // CJS require keeps module.parent set, so pdf-parse does not read its debug fixture.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, global-require -- pdf-parse debug fixture
   const pdfParse = require('pdf-parse') as (
     data: Buffer,
   ) => Promise<{ text?: string }>;

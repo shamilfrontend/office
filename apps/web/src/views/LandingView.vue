@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import AppLogo from '@/components/AppLogo.vue'
-import { useAuthStore } from '@/stores/auth'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue';
+import AppLogo from '@/components/AppLogo.vue';
+import { useAuthStore } from '@/stores/auth';
+import { useRoute, useRouter } from 'vue-router';
 
-const auth = useAuthStore()
-const route = useRoute()
-const router = useRouter()
-const authError = ref('')
+const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
+const authError = ref('');
 
-const yandexEnabled = computed(() => auth.authConfig.yandexEnabled)
+const yandexEnabled = computed(() => auth.authConfig.yandexEnabled);
 
 onMounted(() => {
-  const err = route.query.authError
+  const err = route.query.authError;
   if (typeof err === 'string' && err) {
-    authError.value = err
-    void router.replace({ query: { ...route.query, authError: undefined } })
+    authError.value = err;
+    void router.replace({ query: { ...route.query, authError: undefined } });
   }
-})
+});
 
 function loginYandex() {
-  window.location.href = '/auth/yandex'
+  window.location.href = '/auth/yandex';
 }
 </script>
 
@@ -35,7 +35,9 @@ function loginYandex() {
       <p class="lead">
         Таблицы и документы в браузере. Свои файлы на сервере, AI — по желанию.
       </p>
-      <p v-if="authError" class="error">{{ authError }}</p>
+      <p v-if="authError" class="error">
+        {{ authError }}
+      </p>
       <div class="actions">
         <button
           v-if="yandexEnabled"

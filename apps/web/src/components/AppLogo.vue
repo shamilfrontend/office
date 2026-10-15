@@ -1,14 +1,14 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    size?: number
-    withLabel?: boolean
+    size?: number;
+    withLabel?: boolean;
   }>(),
   {
     size: 28,
     withLabel: true,
   },
-)
+);
 </script>
 
 <template>

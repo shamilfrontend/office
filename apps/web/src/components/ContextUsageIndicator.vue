@@ -1,62 +1,62 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   RESERVE_COLOR,
   type ChatContextUsage,
-} from '@/ai/estimateChatContextUsage'
-import { formatTokenCount } from '@/ai/estimateTokens'
+} from '@/ai/estimateChatContextUsage';
+import { formatTokenCount } from '@/ai/estimateTokens';
 
-const props = defineProps<{ usage: ChatContextUsage | null }>()
+const props = defineProps<{ usage: ChatContextUsage | null }>();
 
-const open = ref(false)
-const root = ref<HTMLElement | null>(null)
+const open = ref(false);
+const root = ref<HTMLElement | null>(null);
 
-const ringSize = 16
-const stroke = 2
-const r = (ringSize - stroke) / 2
-const circumference = 2 * Math.PI * r
+const ringSize = 16;
+const stroke = 2;
+const r = (ringSize - stroke) / 2;
+const circumference = 2 * Math.PI * r;
 
-const pct = computed(() => props.usage?.percentFull ?? 0)
+const pct = computed(() => props.usage?.percentFull ?? 0);
 const dashOffset = computed(
   () =>
     circumference -
     (Math.min(100, Math.max(0, pct.value)) / 100) * circumference,
-)
+);
 const ringColor = computed(() => {
-  const p = pct.value
-  if (p >= 95) return '#f87171'
-  if (p >= 80) return '#fbbf24'
-  return 'currentColor'
-})
+  const p = pct.value;
+  if (p >= 95) return '#f87171';
+  if (p >= 80) return '#fbbf24';
+  return 'currentColor';
+});
 
 function toggle() {
-  if (!props.usage) return
-  open.value = !open.value
+  if (!props.usage) return;
+  open.value = !open.value;
 }
 
 function onDocMouseDown(e: MouseEvent) {
-  const target = e.target as Node
-  if (root.value && !root.value.contains(target)) open.value = false
+  const target = e.target as Node;
+  if (root.value && !root.value.contains(target)) open.value = false;
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape') open.value = false
+  if (e.key === 'Escape') open.value = false;
 }
 
 watch(open, (isOpen) => {
   if (isOpen) {
-    document.addEventListener('mousedown', onDocMouseDown)
-    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
   } else {
-    document.removeEventListener('mousedown', onDocMouseDown)
-    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('mousedown', onDocMouseDown);
+    document.removeEventListener('keydown', onKeyDown);
   }
-})
+});
 
 onBeforeUnmount(() => {
-  document.removeEventListener('mousedown', onDocMouseDown)
-  document.removeEventListener('keydown', onKeyDown)
-})
+  document.removeEventListener('mousedown', onDocMouseDown);
+  document.removeEventListener('keydown', onKeyDown);
+});
 </script>
 
 <template>

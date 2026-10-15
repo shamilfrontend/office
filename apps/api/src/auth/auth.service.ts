@@ -57,7 +57,8 @@ export class AuthService {
         }),
       });
     } catch (e) {
-      const cause = e instanceof Error && e.cause instanceof Error ? e.cause.message : '';
+      const cause =
+        e instanceof Error && e.cause instanceof Error ? e.cause.message : '';
       throw new Error(
         `Cannot reach oauth.yandex.ru${cause ? `: ${cause}` : ''}. Check network/proxy.`,
       );
@@ -74,7 +75,8 @@ export class AuthService {
         headers: { Authorization: `OAuth ${tokenJson.access_token}` },
       });
     } catch (e) {
-      const cause = e instanceof Error && e.cause instanceof Error ? e.cause.message : '';
+      const cause =
+        e instanceof Error && e.cause instanceof Error ? e.cause.message : '';
       throw new Error(
         `Cannot reach login.yandex.ru${cause ? `: ${cause}` : ''}. Check network/proxy.`,
       );
@@ -130,7 +132,8 @@ export class AuthService {
       sub: user.id,
       yandexId: user.yandexId,
     });
-    const cookieName = this.config.get<string>('COOKIE_NAME') ?? 'office_session';
+    const cookieName =
+      this.config.get<string>('COOKIE_NAME') ?? 'office_session';
     res.cookie(cookieName, token, {
       httpOnly: true,
       sameSite: 'lax',
@@ -142,7 +145,8 @@ export class AuthService {
   }
 
   clearSession(res: Response) {
-    const cookieName = this.config.get<string>('COOKIE_NAME') ?? 'office_session';
+    const cookieName =
+      this.config.get<string>('COOKIE_NAME') ?? 'office_session';
     res.clearCookie(cookieName);
   }
 

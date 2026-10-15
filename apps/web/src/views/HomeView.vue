@@ -1,201 +1,217 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { api, type DocItem } from '@/api/client'
-import AppLogo from '@/components/AppLogo.vue'
-import { uiConfirm } from '@/composables/useConfirm'
-import { useAuthStore } from '@/stores/auth'
-import { useFileTabsStore } from '@/stores/fileTabs'
+import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { api, type DocItem } from '@/api/client';
+import AppLogo from '@/components/AppLogo.vue';
+import { uiConfirm } from '@/composables/useConfirm';
+import { useAuthStore } from '@/stores/auth';
+import { useFileTabsStore } from '@/stores/fileTabs';
 
-type FileGroup = { key: string; label: string; items: DocItem[] }
+type FileGroup = { key: string; label: string; items: DocItem[] };
 
-const auth = useAuthStore()
-const fileTabs = useFileTabsStore()
-const router = useRouter()
-const files = ref<DocItem[]>([])
-const query = ref('')
-const busy = ref(false)
-const uploading = ref(false)
-const fileInput = ref<HTMLInputElement | null>(null)
-const menuOpenId = ref<string | null>(null)
-const profileMenuOpen = ref(false)
+const auth = useAuthStore();
+const fileTabs = useFileTabsStore();
+const router = useRouter();
+const files = ref<DocItem[]>([]);
+const query = ref('');
+const busy = ref(false);
+const uploading = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
+const menuOpenId = ref<string | null>(null);
+const profileMenuOpen = ref(false);
 
 const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  if (!q) return files.value
-  return files.value.filter((f) => f.name.toLowerCase().includes(q))
-})
+  const q = query.value.trim().toLowerCase();
+  if (!q) return files.value;
+  return files.value.filter((f) => f.name.toLowerCase().includes(q));
+});
 
 const groups = computed((): FileGroup[] => {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const weekAgo = startOfToday - 6 * 86400000
-  const monthAgo = startOfToday - 29 * 86400000
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const weekAgo = startOfToday - 6 * 86400000;
+  const monthAgo = startOfToday - 29 * 86400000;
 
   const buckets: Record<string, DocItem[]> = {
     today: [],
     week: [],
     month: [],
     earlier: [],
-  }
+  };
 
-  for (const doc of filtered.value) {
-    const t = new Date(doc.updatedAt).getTime()
-    if (t >= startOfToday) buckets.today.push(doc)
-    else if (t >= weekAgo) buckets.week.push(doc)
-    else if (t >= monthAgo) buckets.month.push(doc)
-    else buckets.earlier.push(doc)
-  }
+  filtered.value.forEach((doc) => {
+    const t = new Date(doc.updatedAt).getTime();
+    if (t >= startOfToday) buckets.today.push(doc);
+    else if (t >= weekAgo) buckets.week.push(doc);
+    else if (t >= monthAgo) buckets.month.push(doc);
+    else buckets.earlier.push(doc);
+  });
 
   const order: Array<{ key: string; label: string }> = [
     { key: 'today', label: 'Сегодня' },
     { key: 'week', label: 'За неделю' },
     { key: 'month', label: 'За месяц' },
     { key: 'earlier', label: 'Ранее' },
-  ]
+  ];
 
   return order
     .map(({ key, label }) => ({ key, label, items: buckets[key] }))
-    .filter((g) => g.items.length > 0)
-})
+    .filter((g) => g.items.length > 0);
+});
 
 async function load() {
-  files.value = await api.listFiles()
+  files.value = await api.listFiles();
 }
 
 onMounted(async () => {
-  auth.openOnboardingIfNeeded()
-  await load()
-})
+  auth.openOnboardingIfNeeded();
+  await load();
+});
 
 async function openDoc(doc: Pick<DocItem, 'id' | 'name' | 'type'>) {
-  fileTabs.open(doc)
-  await router.push(`/edit/${doc.id}`)
+  fileTabs.open(doc);
+  await router.push(`/edit/${doc.id}`);
 }
 
 async function create(type: 'SHEET' | 'DOC') {
-  busy.value = true
+  busy.value = true;
   try {
-    const doc = await api.createFile(type)
-    await openDoc(doc)
+    const doc = await api.createFile(type);
+    await openDoc(doc);
   } finally {
-    busy.value = false
+    busy.value = false;
   }
 }
 
 function pickLocal() {
-  fileInput.value?.click()
+  fileInput.value?.click();
 }
 
 async function onLocalFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  busy.value = true
-  uploading.value = true
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  busy.value = true;
+  uploading.value = true;
   try {
-    let upload = file
-    let typeHint: string | undefined
-    const lower = file.name.toLowerCase()
+    let upload = file;
+    let typeHint: string | undefined;
+    const lower = file.name.toLowerCase();
     if (
       lower.endsWith('.xlsx') ||
       lower.endsWith('.xls') ||
       lower.endsWith('.csv')
     ) {
-      const { spreadsheetFileToUpload } = await import('@/univer/excelImport')
-      upload = await spreadsheetFileToUpload(file)
-      typeHint = 'SHEET'
+      const { spreadsheetFileToUpload } = await import('@/univer/excelImport');
+      upload = await spreadsheetFileToUpload(file);
+      typeHint = 'SHEET';
     }
-    const doc = await api.uploadFile(upload, typeHint)
-    await openDoc(doc)
+    const doc = await api.uploadFile(upload, typeHint);
+    await openDoc(doc);
   } catch (err) {
-    alert(err instanceof Error ? err.message : 'Ошибка загрузки')
+    alert(err instanceof Error ? err.message : 'Ошибка загрузки');
   } finally {
-    busy.value = false
-    uploading.value = false
-    input.value = ''
+    busy.value = false;
+    uploading.value = false;
+    input.value = '';
   }
 }
 
 async function rename(doc: DocItem) {
-  menuOpenId.value = null
-  const name = prompt('Новое имя', doc.name)
-  if (!name || name === doc.name) return
-  await api.renameFile(doc.id, name)
-  fileTabs.rename(doc.id, name)
-  await load()
+  menuOpenId.value = null;
+  const name = prompt('Новое имя', doc.name);
+  if (!name || name === doc.name) return;
+  await api.renameFile(doc.id, name);
+  fileTabs.rename(doc.id, name);
+  await load();
 }
 
 async function remove(doc: DocItem) {
-  menuOpenId.value = null
-  if (!confirm(`Удалить «${doc.name}»?`)) return
-  await api.deleteFile(doc.id)
-  fileTabs.remove(doc.id)
-  await load()
+  menuOpenId.value = null;
+  if (!window.confirm(`Удалить «${doc.name}»?`)) return;
+  await api.deleteFile(doc.id);
+  fileTabs.remove(doc.id);
+  await load();
 }
 
 async function download(doc: DocItem) {
-  menuOpenId.value = null
-  const format = doc.type === 'SHEET' ? 'xlsx' : 'docx'
-  window.open(api.downloadUrl(doc.id, format), '_blank')
+  menuOpenId.value = null;
+  const format = doc.type === 'SHEET' ? 'xlsx' : 'docx';
+  window.open(api.downloadUrl(doc.id, format), '_blank');
 }
 
 function toggleMenu(id: string, e: Event) {
-  e.stopPropagation()
-  profileMenuOpen.value = false
-  menuOpenId.value = menuOpenId.value === id ? null : id
+  e.stopPropagation();
+  profileMenuOpen.value = false;
+  menuOpenId.value = menuOpenId.value === id ? null : id;
 }
 
 function toggleProfileMenu(e: Event) {
-  e.stopPropagation()
-  menuOpenId.value = null
-  profileMenuOpen.value = !profileMenuOpen.value
+  e.stopPropagation();
+  menuOpenId.value = null;
+  profileMenuOpen.value = !profileMenuOpen.value;
 }
 
 function closeMenu() {
-  menuOpenId.value = null
-  profileMenuOpen.value = false
+  menuOpenId.value = null;
+  profileMenuOpen.value = false;
 }
 
 function openSettings() {
-  profileMenuOpen.value = false
-  auth.openSettings()
+  profileMenuOpen.value = false;
+  auth.openSettings();
 }
 
 function formatDate(iso: string) {
-  const d = new Date(iso)
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const t = d.getTime()
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const t = d.getTime();
   if (t >= startOfToday) {
-    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
   if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
   }
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+  return d.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 function formatSize(bytes: number) {
-  if (!bytes || bytes < 0) return '—'
-  if (bytes < 1024) return `${bytes} Б`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} КБ`
+  if (!bytes || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} КБ`;
   if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} МБ`
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
   }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
 }
 
 async function logout() {
-  profileMenuOpen.value = false
+  profileMenuOpen.value = false;
   const ok = await uiConfirm({
     title: 'Выйти из аккаунта?',
     message: 'Сессия будет завершена на этом устройстве.',
     confirmLabel: 'Выйти',
-  })
-  if (!ok) return
-  await auth.logout()
-  await router.push('/')
+  });
+  if (!ok) return;
+  await auth.logout();
+  await router.push('/');
 }
 </script>
 
@@ -218,10 +234,18 @@ async function logout() {
             <img v-if="auth.me?.avatarUrl" :src="auth.me.avatarUrl" alt="" />
             <span v-else>{{ auth.me?.displayName?.[0] || 'U' }}</span>
           </button>
-          <div v-if="profileMenuOpen" class="ui-dropdown profile-menu" @click.stop>
+          <div
+            v-if="profileMenuOpen"
+            class="ui-dropdown profile-menu"
+            @click.stop
+          >
             <div class="profile-meta">
-              <div class="profile-name">{{ auth.me?.displayName || 'Аккаунт' }}</div>
-              <div v-if="auth.me?.email" class="profile-email">{{ auth.me.email }}</div>
+              <div class="profile-name">
+                {{ auth.me?.displayName || 'Аккаунт' }}
+              </div>
+              <div v-if="auth.me?.email" class="profile-email">
+                {{ auth.me.email }}
+              </div>
             </div>
             <button type="button" @click="openSettings">Настройки</button>
             <button type="button" class="danger" @click="logout">Выйти</button>
@@ -234,18 +258,41 @@ async function logout() {
       <div class="create-block">
         <h2 class="section-title">Создать</h2>
         <div class="tiles">
-          <button type="button" class="tile" :disabled="busy" @click="create('SHEET')">
+          <button
+            type="button"
+            class="tile"
+            :disabled="busy"
+            @click="create('SHEET')"
+          >
             <span class="tile-icon sheet" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="22" height="22">
-                <rect x="3" y="4" width="18" height="16" rx="2" fill="currentColor" opacity="0.18" />
-                <path d="M3 9h18M9 4v16" stroke="currentColor" stroke-width="1.5" fill="none" />
+                <rect
+                  x="3"
+                  y="4"
+                  width="18"
+                  height="16"
+                  rx="2"
+                  fill="currentColor"
+                  opacity="0.18"
+                />
+                <path
+                  d="M3 9h18M9 4v16"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  fill="none"
+                />
               </svg>
             </span>
             <span class="tile-text">
               <span class="tile-label">Новая таблица</span>
             </span>
           </button>
-          <button type="button" class="tile" :disabled="busy" @click="create('DOC')">
+          <button
+            type="button"
+            class="tile"
+            :disabled="busy"
+            @click="create('DOC')"
+          >
             <span class="tile-icon doc" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="22" height="22">
                 <path
@@ -287,7 +334,9 @@ async function logout() {
               </svg>
             </span>
             <span class="tile-text">
-              <span class="tile-label">{{ uploading ? 'Открываем…' : 'Открыть с компьютера' }}</span>
+              <span class="tile-label">{{
+                uploading ? 'Открываем…' : 'Открыть с компьютера'
+              }}</span>
             </span>
           </button>
           <input
@@ -304,7 +353,8 @@ async function logout() {
         <h2 class="section-title">Недавние</h2>
 
         <div v-if="!filtered.length" class="empty">
-          Пока нет файлов. Создайте таблицу или документ выше — или откройте файл с компьютера.
+          Пока нет файлов. Создайте таблицу или документ выше — или откройте
+          файл с компьютера.
         </div>
 
         <template v-else>
@@ -317,14 +367,38 @@ async function logout() {
           </div>
 
           <div v-for="group in groups" :key="group.key" class="group">
-            <h3 class="group-label">{{ group.label }}</h3>
+            <h3 class="group-label">
+              {{ group.label }}
+            </h3>
             <ul class="file-list">
               <li v-for="doc in group.items" :key="doc.id" class="file-item">
                 <button type="button" class="file-main" @click="openDoc(doc)">
-                  <span class="type-icon" :class="doc.type === 'SHEET' ? 'sheet' : 'doc'" aria-hidden="true">
-                    <svg v-if="doc.type === 'SHEET'" viewBox="0 0 24 24" width="16" height="16">
-                      <rect x="3" y="4" width="18" height="16" rx="2" fill="currentColor" opacity="0.2" />
-                      <path d="M3 9h18M9 4v16" stroke="currentColor" stroke-width="1.5" fill="none" />
+                  <span
+                    class="type-icon"
+                    :class="doc.type === 'SHEET' ? 'sheet' : 'doc'"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      v-if="doc.type === 'SHEET'"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                    >
+                      <rect
+                        x="3"
+                        y="4"
+                        width="18"
+                        height="16"
+                        rx="2"
+                        fill="currentColor"
+                        opacity="0.2"
+                      />
+                      <path
+                        d="M3 9h18M9 4v16"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        fill="none"
+                      />
                     </svg>
                     <svg v-else viewBox="0 0 24 24" width="16" height="16">
                       <path
@@ -353,16 +427,31 @@ async function logout() {
                     :aria-expanded="menuOpenId === doc.id"
                     @click="toggleMenu(doc.id, $event)"
                   >
-                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      aria-hidden="true"
+                    >
                       <circle cx="12" cy="6" r="1.5" fill="currentColor" />
                       <circle cx="12" cy="12" r="1.5" fill="currentColor" />
                       <circle cx="12" cy="18" r="1.5" fill="currentColor" />
                     </svg>
                   </button>
-                  <div v-if="menuOpenId === doc.id" class="ui-dropdown file-menu" @click.stop>
-                    <button type="button" @click="download(doc)">Скачать</button>
-                    <button type="button" @click="rename(doc)">Переименовать</button>
-                    <button type="button" class="danger" @click="remove(doc)">Удалить</button>
+                  <div
+                    v-if="menuOpenId === doc.id"
+                    class="ui-dropdown file-menu"
+                    @click.stop
+                  >
+                    <button type="button" @click="download(doc)">
+                      Скачать
+                    </button>
+                    <button type="button" @click="rename(doc)">
+                      Переименовать
+                    </button>
+                    <button type="button" class="danger" @click="remove(doc)">
+                      Удалить
+                    </button>
                   </div>
                 </div>
               </li>
@@ -517,7 +606,9 @@ async function logout() {
   color: var(--fg-0);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .tile:hover:not(:disabled) {
   background: var(--bg-hover);

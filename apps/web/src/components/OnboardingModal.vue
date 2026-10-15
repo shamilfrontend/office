@@ -1,79 +1,79 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { api } from '@/api/client'
-import AppLogo from '@/components/AppLogo.vue'
-import { useAuthStore } from '@/stores/auth'
+import { reactive, ref } from 'vue';
+import { api } from '@/api/client';
+import AppLogo from '@/components/AppLogo.vue';
+import { useAuthStore } from '@/stores/auth';
 
-const auth = useAuthStore()
+const auth = useAuthStore();
 const form = reactive({
   provider: 'DEEPSEEK',
   baseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',
-})
-const status = ref('')
-const busy = ref(false)
+});
+const status = ref('');
+const busy = ref(false);
 
 const providers = [
   { id: 'DEEPSEEK', label: 'DeepSeek' },
   { id: 'OLLAMA', label: 'Ollama' },
   { id: 'LMSTUDIO', label: 'LM Studio' },
   { id: 'OPENAI_COMPATIBLE', label: 'OpenAI-compatible' },
-]
+];
 
 async function onProviderChange() {
-  const defaults = await api.aiDefaults()
-  const d = defaults[form.provider] as { baseUrl: string }
-  form.baseUrl = d.baseUrl
-  status.value = ''
+  const defaults = await api.aiDefaults();
+  const d = defaults[form.provider] as { baseUrl: string };
+  form.baseUrl = d.baseUrl;
+  status.value = '';
 }
 
 async function test() {
-  busy.value = true
-  status.value = 'Проверка…'
+  busy.value = true;
+  status.value = 'Проверка…';
   try {
     const res = await api.testProvider({
       provider: form.provider,
       baseUrl: form.baseUrl,
       apiKey: form.apiKey || undefined,
-    })
+    });
     if (!res.ok) {
-      status.value = res.error || 'Ошибка'
-      return
+      status.value = res.error || 'Ошибка';
+      return;
     }
-    status.value = `OK · ${res.models.length} моделей доступно`
+    status.value = `OK · ${res.models.length} моделей доступно`;
   } catch (e) {
-    status.value = e instanceof Error ? e.message : 'Ошибка'
+    status.value = e instanceof Error ? e.message : 'Ошибка';
   } finally {
-    busy.value = false
+    busy.value = false;
   }
 }
 
 async function save() {
-  busy.value = true
+  busy.value = true;
   try {
-    const defaults = await api.aiDefaults()
-    const d = defaults[form.provider] as { needsKey?: boolean } | undefined
+    const defaults = await api.aiDefaults();
+    const d = defaults[form.provider] as { needsKey?: boolean } | undefined;
     if (d?.needsKey && !form.apiKey.trim()) {
-      status.value = 'API-ключ обязателен для этого провайдера.'
-      return
+      status.value = 'API-ключ обязателен для этого провайдера.';
+      return;
     }
     await api.upsertProvider({
       provider: form.provider,
       baseUrl: form.baseUrl,
       apiKey: form.apiKey || undefined,
       enabled: true,
-    })
-    await auth.refreshMe()
-    auth.showOnboarding = false
+    });
+    await auth.refreshMe();
+    auth.showOnboarding = false;
   } catch (e) {
-    status.value = e instanceof Error ? e.message : 'Ошибка сохранения'
+    status.value = e instanceof Error ? e.message : 'Ошибка сохранения';
   } finally {
-    busy.value = false
+    busy.value = false;
   }
 }
 
 async function skip() {
-  await auth.skipOnboarding()
+  await auth.skipOnboarding();
 }
 </script>
 
@@ -84,7 +84,9 @@ async function skip() {
         <AppLogo :size="36" />
       </div>
       <h2>Подключить AI-помощника?</h2>
-      <p class="hint">Можно пропустить и настроить позже в Настройках. Модель выберете в чате.</p>
+      <p class="hint">
+        Можно пропустить и настроить позже в Настройках. Модель выберете в чате.
+      </p>
 
       <label>
         Провайдер
@@ -111,16 +113,33 @@ async function skip() {
         />
       </label>
 
-      <p v-if="status" class="status">{{ status }}</p>
+      <p v-if="status" class="status">
+        {{ status }}
+      </p>
 
       <div class="row">
-        <button type="button" class="ui-btn ui-btn--ghost" :disabled="busy" @click="test">
+        <button
+          type="button"
+          class="ui-btn ui-btn--ghost"
+          :disabled="busy"
+          @click="test"
+        >
           Проверить
         </button>
-        <button type="button" class="ui-btn ui-btn--ghost" :disabled="busy" @click="skip">
+        <button
+          type="button"
+          class="ui-btn ui-btn--ghost"
+          :disabled="busy"
+          @click="skip"
+        >
           Пропустить
         </button>
-        <button type="button" class="ui-btn ui-btn--primary" :disabled="busy" @click="save">
+        <button
+          type="button"
+          class="ui-btn ui-btn--primary"
+          :disabled="busy"
+          @click="save"
+        >
           Подключить
         </button>
       </div>

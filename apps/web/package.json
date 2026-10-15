@@ -6,11 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "npm run lint --prefix ../..",
+    "lint:fix": "npm run lint:fix --prefix ../..",
+    "format": "npm run format --prefix ../.."
   },
   "dependencies": {
     "@mertdeveci55/univer-import-export": "^0.2.1",
     "@office/shared": "file:../../packages/shared",
+    "@univerjs/core": "^1.0.4",
+    "@univerjs/docs": "^1.0.4",
+    "@univerjs/docs-ui": "^1.0.4",
     "@univerjs/preset-docs-core": "^1.0.4",
     "@univerjs/preset-sheets-conditional-formatting": "^1.0.4",
     "@univerjs/preset-sheets-core": "^1.0.4",

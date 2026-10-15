@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { User } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { UserStorageService } from '../storage/user-storage.service';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
+import { PrismaService } from '../prisma/prisma.service';
+import { UserStorageService } from '../storage/user-storage.service';
 import type { MulterFile } from '../types/uploaded-file';
 import { decodeUploadFilename } from './decode-filename';
 import {
@@ -121,11 +121,7 @@ export class FilesService {
     return { ok: true };
   }
 
-  async uploadFromComputer(
-    user: User,
-    file: MulterFile,
-    typeHint?: string,
-  ) {
+  async uploadFromComputer(user: User, file: MulterFile, typeHint?: string) {
     if (!file) throw new BadRequestException('File required');
     const original = decodeUploadFilename(file.originalname || 'import.json');
     const lower = original.toLowerCase();
@@ -186,11 +182,7 @@ export class FilesService {
     });
   }
 
-  async download(
-    userId: string,
-    id: string,
-    format: DownloadFormat = 'json',
-  ) {
+  async download(userId: string, id: string, format: DownloadFormat = 'json') {
     const doc = await this.get(userId, id);
     const snapshot = doc.snapshot as Record<string, unknown>;
 
@@ -247,7 +239,10 @@ export class FilesService {
       row.forEach((value, c) => {
         const num = Number(value);
         cellData[r][c] = {
-          v: value !== '' && !Number.isNaN(num) && value.trim() !== '' ? num : value,
+          v:
+            value !== '' && !Number.isNaN(num) && value.trim() !== ''
+              ? num
+              : value,
         };
       });
     });
@@ -271,12 +266,12 @@ export class FilesService {
     const result: string[] = [];
     let current = '';
     let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
+    for (let i = 0; i < line.length; i += 1) {
       const ch = line[i];
       if (ch === '"') {
         if (inQuotes && line[i + 1] === '"') {
           current += '"';
-          i++;
+          i += 1;
         } else {
           inQuotes = !inQuotes;
         }
@@ -298,29 +293,27 @@ export class FilesService {
         cellData?: Record<string, Record<string, { v?: unknown }>>;
       }
     >;
-    const order = (snapshot.sheetOrder as string[]) ?? Object.keys(sheets ?? {});
+    const order =
+      (snapshot.sheetOrder as string[]) ?? Object.keys(sheets ?? {});
     const sheet = sheets?.[order[0]];
     const cellData = sheet?.cellData ?? {};
     const rowKeys = Object.keys(cellData)
       .map(Number)
       .sort((a, b) => a - b);
-    const lines: string[] = [];
-    for (const r of rowKeys) {
+    const lines = rowKeys.map((r) => {
       const row = cellData[String(r)] ?? {};
       const colKeys = Object.keys(row)
         .map(Number)
         .sort((a, b) => a - b);
       const maxCol = colKeys.length ? Math.max(...colKeys) : -1;
       const values: string[] = [];
-      for (let c = 0; c <= maxCol; c++) {
+      for (let c = 0; c <= maxCol; c += 1) {
         const v = row[String(c)]?.v;
         const raw = v == null ? '' : String(v);
-        values.push(
-          /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw,
-        );
+        values.push(/[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw);
       }
-      lines.push(values.join(','));
-    }
+      return values.join(',');
+    });
     return lines.join('\n');
   }
 

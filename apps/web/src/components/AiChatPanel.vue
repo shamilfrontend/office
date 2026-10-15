@@ -1,25 +1,32 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
-import { useRouter } from 'vue-router'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+import { useRouter } from 'vue-router';
 import {
   estimateChatContextUsage,
   type ChatContextUsage,
-} from '@/ai/estimateChatContextUsage'
-import { chatTokenCalibrator } from '@/ai/estimateTokens'
-import { api, type ChatRecord, type ChatSummary } from '@/api/client'
-import ContextUsageIndicator from '@/components/ContextUsageIndicator.vue'
-import { uiConfirm } from '@/composables/useConfirm'
-import { isToolAutoAllowed } from '@/composables/useAiToolPermissions'
-import { useAuthStore } from '@/stores/auth'
-import type { UniverApi } from '@/univer/useUniver'
+} from '@/ai/estimateChatContextUsage';
+import { chatTokenCalibrator } from '@/ai/estimateTokens';
+import { api, type ChatRecord, type ChatSummary } from '@/api/client';
+import ContextUsageIndicator from '@/components/ContextUsageIndicator.vue';
+import { uiConfirm } from '@/composables/useConfirm';
+import { isToolAutoAllowed } from '@/composables/useAiToolPermissions';
+import { useAuthStore } from '@/stores/auth';
+import type { UniverApi } from '@/univer/useUniver';
 import {
   parsePlanMarkdown,
   planAllTodosDone,
   planToMarkdown,
   type Plan,
-} from '@office/shared'
+} from '@office/shared';
 import {
   describeImpact,
   isDocumentWriteTool,
@@ -28,177 +35,175 @@ import {
   toolsForMode,
   type ChatMode,
   type ImpactSummary,
-} from '@/univer/officeTools'
+} from '@/univer/officeTools';
 
-type ToolCall = { id: string; name: string; arguments: string }
+type ToolCall = { id: string; name: string; arguments: string };
 type UiMsg =
   | { key: string; role: 'user'; content: string; wire: string }
   | { key: string; role: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | {
-      key: string
-      role: 'tool'
-      name: string
-      content: string
-      full: string
-      status: 'ok' | 'error' | 'pending'
-      toolCallId: string
-    }
+      key: string;
+      role: 'tool';
+      name: string;
+      content: string;
+      full: string;
+      status: 'ok' | 'error' | 'pending';
+      toolCallId: string;
+    };
 
-type ModelOption = { providerId: string; provider: string; model: string }
+type ModelOption = { providerId: string; provider: string; model: string };
 
 type SessionLogEntry = {
-  ts: string
-  chatId: string
-  chatTitle: string
-  kind: 'user' | 'assistant' | 'tool' | 'system'
-  name?: string
-  content: string
-  status?: 'ok' | 'error' | 'pending'
-}
+  ts: string;
+  chatId: string;
+  chatTitle: string;
+  kind: 'user' | 'assistant' | 'tool' | 'system';
+  name?: string;
+  content: string;
+  status?: 'ok' | 'error' | 'pending';
+};
 
-type PlanRunState = 'idle' | 'running' | 'done'
+type PlanRunState = 'idle' | 'running' | 'done';
 
 type Tab = {
-  id: string
-  title: string
-  mode: ChatMode
-  providerId: string
-  model: string
-  draft: string
-  attachments: Array<{ name: string; text: string }>
-  includeDoc: boolean
-  messages: UiMsg[]
-  plan: Plan | null
-  planTitle: string | null
-  planMarkdown: string | null
-  planEdited: boolean
-  planRunState: PlanRunState
-  streaming: boolean
-  tokenRate: number | null
-  tokenMeta: string | null
-  showCheckpoint: boolean
-  wroteSinceCheckpoint: boolean
-  canRetry: boolean
-  retryReason: string | null
-  executingPlan: boolean
-  abort: AbortController | null
-  allowedTools: Set<string>
+  id: string;
+  title: string;
+  mode: ChatMode;
+  providerId: string;
+  model: string;
+  draft: string;
+  attachments: Array<{ name: string; text: string }>;
+  includeDoc: boolean;
+  messages: UiMsg[];
+  plan: Plan | null;
+  planTitle: string | null;
+  planMarkdown: string | null;
+  planEdited: boolean;
+  planRunState: PlanRunState;
+  streaming: boolean;
+  tokenRate: number | null;
+  tokenMeta: string | null;
+  showCheckpoint: boolean;
+  wroteSinceCheckpoint: boolean;
+  canRetry: boolean;
+  retryReason: string | null;
+  executingPlan: boolean;
+  abort: AbortController | null;
+  allowedTools: Set<string>;
   pendingApprove: {
-    name: string
-    args: Record<string, unknown>
-    summary: ImpactSummary
-    resolve: (ok: boolean) => void
-  } | null
-}
+    name: string;
+    args: Record<string, unknown>;
+    summary: ImpactSummary;
+    resolve: (ok: boolean) => void;
+  } | null;
+};
 
 type LoopStopReason =
-  | 'rejected'
-  | 'aborted'
-  | 'editor'
-  | 'tools'
-  | 'stream'
-  | 'loop'
-  | null
+  'rejected' | 'aborted' | 'editor' | 'tools' | 'stream' | 'loop' | null;
 
 function retryLabel(reason: LoopStopReason): string | null {
-  if (reason === 'rejected') return 'Отклонено'
-  if (reason === 'aborted') return 'Остановлено'
-  if (reason === 'editor') return 'Редактор не готов'
-  if (reason === 'tools') return 'Стоп по ошибкам tools'
-  if (reason === 'stream') return 'Ошибка сети'
-  if (reason === 'loop') return 'Зацикливание tools'
-  return null
+  if (reason === 'rejected') return 'Отклонено';
+  if (reason === 'aborted') return 'Остановлено';
+  if (reason === 'editor') return 'Редактор не готов';
+  if (reason === 'tools') return 'Стоп по ошибкам tools';
+  if (reason === 'stream') return 'Ошибка сети';
+  if (reason === 'loop') return 'Зацикливание tools';
+  return null;
 }
 
 const props = defineProps<{
-  collapsed: boolean
-  docType?: 'SHEET' | 'DOC' | null
-  docName?: string
-  documentId?: string
-  univerApi?: UniverApi | null
-  getSelectionContext?: () => string
-}>()
+  collapsed: boolean;
+  docType?: 'SHEET' | 'DOC' | null;
+  docName?: string;
+  documentId?: string;
+  univerApi?: UniverApi | null;
+  getSelectionContext?: () => string;
+}>();
 
 const emit = defineEmits<{
-  toggle: []
-  checkpoint: []
-  restoreCheckpoint: []
-  documentChanged: []
-}>()
+  toggle: [];
+  checkpoint: [];
+  restoreCheckpoint: [];
+  documentChanged: [];
+}>();
 
-const WIDTH_KEY = 'office_chat_width'
-const auth = useAuthStore()
-const router = useRouter()
-const tabs = ref<Tab[]>([])
-const activeId = ref('')
-const width = ref(readWidth())
-const modeMenu = ref(false)
-const modelMenu = ref(false)
-const modelOptions = ref<ModelOption[]>([])
-const modelMenuLoading = ref(false)
-const modelMenuError = ref('')
-const planOpen = ref(false)
-const planDraft = ref('')
-const fileInput = ref<HTMLInputElement | null>(null)
-const composerEl = ref<HTMLTextAreaElement | null>(null)
-const transcriptEl = ref<HTMLElement | null>(null)
-const modeWrap = ref<HTMLElement | null>(null)
-const modelWrap = ref<HTMLElement | null>(null)
-const historyBtn = ref<HTMLElement | null>(null)
-const historyPanel = ref<HTMLElement | null>(null)
-const planModal = ref<HTMLElement | null>(null)
-const attachError = ref('')
-const sessionLog = ref<SessionLogEntry[]>([])
-const logCopied = ref(false)
-const historyOpen = ref(false)
-const historyItems = ref<ChatSummary[]>([])
-const historyLoading = ref(false)
-const historyError = ref('')
-const renamingId = ref('')
-const renameDraft = ref('')
-const expandedTools = ref<Set<string>>(new Set())
-const approveExpanded = ref(false)
-const copiedKey = ref('')
-const streamHtmlKey = ref('')
-const streamHtml = ref('')
-const contextUsage = ref<ChatContextUsage | null>(null)
-let logCopiedTimer: ReturnType<typeof setTimeout> | null = null
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
-let streamHtmlTimer: ReturnType<typeof setTimeout> | null = null
-let contextUsageTimer: ReturnType<typeof setTimeout> | null = null
-let lastTokenRateAt = 0
+const WIDTH_KEY = 'office_chat_width';
+const auth = useAuthStore();
+const router = useRouter();
+const tabs = ref<Tab[]>([]);
+const activeId = ref('');
+const width = ref(readWidth());
+const modeMenu = ref(false);
+const modelMenu = ref(false);
+const modelOptions = ref<ModelOption[]>([]);
+const modelMenuLoading = ref(false);
+const modelMenuError = ref('');
+const planOpen = ref(false);
+const planDraft = ref('');
+const fileInput = ref<HTMLInputElement | null>(null);
+const composerEl = ref<HTMLTextAreaElement | null>(null);
+const transcriptEl = ref<HTMLElement | null>(null);
+const modeWrap = ref<HTMLElement | null>(null);
+const modelWrap = ref<HTMLElement | null>(null);
+const historyBtn = ref<HTMLElement | null>(null);
+const historyPanel = ref<HTMLElement | null>(null);
+const planModal = ref<HTMLElement | null>(null);
+const attachError = ref('');
+const sessionLog = ref<SessionLogEntry[]>([]);
+const logCopied = ref(false);
+const historyOpen = ref(false);
+const historyItems = ref<ChatSummary[]>([]);
+const historyLoading = ref(false);
+const historyError = ref('');
+const renamingId = ref('');
+const renameDraft = ref('');
+const expandedTools = ref<Set<string>>(new Set());
+const approveExpanded = ref(false);
+const copiedKey = ref('');
+const streamHtmlKey = ref('');
+const streamHtml = ref('');
+const contextUsage = ref<ChatContextUsage | null>(null);
+let logCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+let streamHtmlTimer: ReturnType<typeof setTimeout> | null = null;
+let contextUsageTimer: ReturnType<typeof setTimeout> | null = null;
+let lastTokenRateAt = 0;
 
-const STREAM_HTML_MS = 80
-const TOKEN_RATE_MS = 200
-const CONTEXT_USAGE_MS = 400
+const STREAM_HTML_MS = 80;
+const TOKEN_RATE_MS = 200;
+const CONTEXT_USAGE_MS = 400;
 
 const attachHelpText =
-  'Можно прикрепить файл (скрепка): Excel, Word, PowerPoint, PDF, TXT, MD, CSV, JSON. Текст файла попадёт в контекст чата (до ~20 тыс. символов).'
+  'Можно прикрепить файл (скрепка): Excel, Word, PowerPoint, PDF, TXT, MD, CSV, JSON. Текст файла попадёт в контекст чата (до ~20 тыс. символов).';
 
-const hasProvider = computed(() => Boolean(auth.me?.hasAiProvider))
-const providers = computed(() => auth.me?.providers?.filter((p) => p.enabled) ?? [])
-const active = computed(() => tabs.value.find((t) => t.id === activeId.value) ?? null)
-const hasMessages = computed(() => Boolean(active.value?.messages.length))
-const hasSessionLog = computed(() => sessionLog.value.length > 0)
+const hasProvider = computed(() => Boolean(auth.me?.hasAiProvider));
+const providers = computed(
+  () => auth.me?.providers?.filter((p) => p.enabled) ?? [],
+);
+const active = computed(
+  () => tabs.value.find((t) => t.id === activeId.value) ?? null,
+);
+const hasMessages = computed(() => Boolean(active.value?.messages.length));
+const hasSessionLog = computed(() => sessionLog.value.length > 0);
 const panelStyle = computed(() =>
   props.collapsed ? undefined : { width: `${width.value}px` },
-)
+);
 const planOverview = computed(() => {
-  const tab = active.value
-  if (!tab?.planMarkdown) return ''
-  if (tab.plan?.overview) return tab.plan.overview.slice(0, 160)
-  const body = tab.planMarkdown.replace(/^#.*\n+/, '')
-  return body.split('\n').filter(Boolean).slice(0, 2).join(' ').slice(0, 160)
-})
+  const tab = active.value;
+  if (!tab?.planMarkdown) return '';
+  if (tab.plan?.overview) return tab.plan.overview.slice(0, 160);
+  const body = tab.planMarkdown.replace(/^#.*\n+/, '');
+  return body.split('\n').filter(Boolean).slice(0, 2).join(' ').slice(0, 160);
+});
 const composerPlaceholder = computed(() => {
-  const mode = active.value?.mode
-  if (mode === 'plan') return 'Опишите задачу для плана…'
-  if (mode === 'chat') return 'Спросите что угодно…'
-  return 'Что сделать с документом?'
-})
+  const mode = active.value?.mode;
+  if (mode === 'plan') return 'Опишите задачу для плана…';
+  if (mode === 'chat') return 'Спросите что угодно…';
+  return 'Что сделать с документом?';
+});
 const emptyHints = computed(() => {
-  const mode = active.value?.mode || 'agent'
-  const isDoc = props.docType === 'DOC'
+  const mode = active.value?.mode || 'agent';
+  const isDoc = props.docType === 'DOC';
   if (mode === 'plan') {
     return isDoc
       ? [
@@ -210,7 +215,7 @@ const emptyHints = computed(() => {
           'Составь план очистки и нормализации таблицы',
           'Разбей задачу на шаги без правок файла',
           'Какие риски у массовой замены значений?',
-        ]
+        ];
   }
   if (mode === 'chat') {
     return isDoc
@@ -223,7 +228,7 @@ const emptyHints = computed(() => {
           'Объясни структуру текущего файла',
           'Что в текущем выделении?',
           'Найди пустые ячейки на активном листе',
-        ]
+        ];
   }
   return isDoc
     ? [
@@ -235,73 +240,73 @@ const emptyHints = computed(() => {
         'Сделай первую строку жирной и подгони ширину колонок',
         'Объедини A1:C1 и добавь внешнюю рамку',
         'Отформатируй заголовки: жирный, заливка, по центру',
-      ]
-})
+      ];
+});
 const approveSummary = computed(() => {
-  const pending = active.value?.pendingApprove
-  if (!pending) return ''
-  const { title, detail } = pending.summary
-  return detail ? `${title}: ${detail}` : title
-})
+  const pending = active.value?.pendingApprove;
+  if (!pending) return '';
+  const { title, detail } = pending.summary;
+  return detail ? `${title}: ${detail}` : title;
+});
 
 watch(
   () => active.value?.messages.length,
   async () => {
-    await nextTick()
-    const el = transcriptEl.value
-    if (el) el.scrollTop = el.scrollHeight
+    await nextTick();
+    const el = transcriptEl.value;
+    if (el) el.scrollTop = el.scrollHeight;
   },
-)
+);
 
 function resetTabs() {
-  for (const tab of tabs.value) {
-    tab.abort?.abort()
-    tab.pendingApprove?.resolve(false)
-  }
-  tabs.value = []
-  activeId.value = ''
-  sessionLog.value = []
-  logCopied.value = false
-  historyOpen.value = false
-  historyItems.value = []
-  historyError.value = ''
-  renamingId.value = ''
-  renameDraft.value = ''
-  expandedTools.value = new Set()
-  approveExpanded.value = false
-  copiedKey.value = ''
-  clearStreamHtml()
-  lastTokenRateAt = 0
-  contextUsage.value = null
+  tabs.value.forEach((tab) => {
+    tab.abort?.abort();
+    tab.pendingApprove?.resolve(false);
+  });
+  tabs.value = [];
+  activeId.value = '';
+  sessionLog.value = [];
+  logCopied.value = false;
+  historyOpen.value = false;
+  historyItems.value = [];
+  historyError.value = '';
+  renamingId.value = '';
+  renameDraft.value = '';
+  expandedTools.value = new Set();
+  approveExpanded.value = false;
+  copiedKey.value = '';
+  clearStreamHtml();
+  lastTokenRateAt = 0;
+  contextUsage.value = null;
   if (logCopiedTimer) {
-    clearTimeout(logCopiedTimer)
-    logCopiedTimer = null
+    clearTimeout(logCopiedTimer);
+    logCopiedTimer = null;
   }
   if (copiedTimer) {
-    clearTimeout(copiedTimer)
-    copiedTimer = null
+    clearTimeout(copiedTimer);
+    copiedTimer = null;
   }
   if (contextUsageTimer) {
-    clearTimeout(contextUsageTimer)
-    contextUsageTimer = null
+    clearTimeout(contextUsageTimer);
+    contextUsageTimer = null;
   }
 }
 
 watch(
   () => active.value?.pendingApprove,
   () => {
-    approveExpanded.value = false
+    approveExpanded.value = false;
   },
-)
+);
 
 function refreshContextUsage() {
-  const tab = active.value
+  const tab = active.value;
   if (!tab || !tab.model) {
-    contextUsage.value = null
-    return
+    contextUsage.value = null;
+    return;
   }
-  const hasDocument = Boolean(props.documentId || props.docName)
-  const wireMessages = trimWireForProvider(toWire(tab))
+  const hasDocument = Boolean(props.documentId || props.docName);
+  const wireMessages = trimWireForProvider(toWire(tab));
   contextUsage.value = estimateChatContextUsage({
     mode: tab.mode,
     model: tab.model,
@@ -317,13 +322,13 @@ function refreshContextUsage() {
     buildingPlan: tab.executingPlan,
     hasDocument,
     calibrator: chatTokenCalibrator,
-  })
+  });
 }
 
 watch(
   () => {
-    const tab = active.value
-    if (!tab) return null
+    const tab = active.value;
+    if (!tab) return null;
     return [
       tab.id,
       tab.mode,
@@ -338,23 +343,23 @@ watch(
       props.docName,
       props.docType,
       props.documentId,
-    ] as const
+    ] as const;
   },
   () => {
-    if (contextUsageTimer) clearTimeout(contextUsageTimer)
+    if (contextUsageTimer) clearTimeout(contextUsageTimer);
     contextUsageTimer = setTimeout(() => {
-      contextUsageTimer = null
-      refreshContextUsage()
-    }, CONTEXT_USAGE_MS)
+      contextUsageTimer = null;
+      refreshContextUsage();
+    }, CONTEXT_USAGE_MS);
   },
   { immediate: true },
-)
+);
 
 function pushSessionLog(
   tab: Tab | null | undefined,
   entry: Omit<SessionLogEntry, 'ts' | 'chatId' | 'chatTitle'> & {
-    chatId?: string
-    chatTitle?: string
+    chatId?: string;
+    chatTitle?: string;
   },
 ) {
   sessionLog.value.push({
@@ -365,7 +370,7 @@ function pushSessionLog(
     name: entry.name,
     content: entry.content,
     status: entry.status,
-  })
+  });
 }
 
 function formatSessionLog() {
@@ -377,7 +382,7 @@ function formatSessionLog() {
     `docType: ${props.docType || '-'}`,
     `entries: ${sessionLog.value.length}`,
     '',
-  ].join('\n')
+  ].join('\n');
   const body = sessionLog.value
     .map((entry) => {
       const meta = [
@@ -388,178 +393,180 @@ function formatSessionLog() {
         `chat=${entry.chatTitle || entry.chatId || '-'}`,
       ]
         .filter(Boolean)
-        .join(' | ')
-      return `[${meta}]\n${entry.content}`
+        .join(' | ');
+      return `[${meta}]\n${entry.content}`;
     })
-    .join('\n\n---\n\n')
-  return `${header}${body}`
+    .join('\n\n---\n\n');
+  return `${header}${body}`;
 }
 
 async function copySessionLog() {
-  if (!sessionLog.value.length) return
+  if (!sessionLog.value.length) return;
   try {
-    await navigator.clipboard.writeText(formatSessionLog())
-    logCopied.value = true
-    if (logCopiedTimer) clearTimeout(logCopiedTimer)
+    await navigator.clipboard.writeText(formatSessionLog());
+    logCopied.value = true;
+    if (logCopiedTimer) clearTimeout(logCopiedTimer);
     logCopiedTimer = setTimeout(() => {
-      logCopied.value = false
-      logCopiedTimer = null
-    }, 1500)
+      logCopied.value = false;
+      logCopiedTimer = null;
+    }, 1500);
   } catch {
-    attachError.value = 'Не удалось скопировать лог'
+    attachError.value = 'Не удалось скопировать лог';
   }
 }
 
 function toolResultStatus(result: string): 'ok' | 'error' {
   try {
-    const parsed = JSON.parse(result) as { error?: unknown }
-    if (parsed && typeof parsed === 'object' && parsed.error != null) return 'error'
+    const parsed = JSON.parse(result) as { error?: unknown };
+    if (parsed && typeof parsed === 'object' && parsed.error != null)
+      return 'error';
   } catch {
     /* plain text result */
   }
-  return 'ok'
+  return 'ok';
 }
 
 watch(hasProvider, (ok) => {
-  if (ok && props.documentId && !tabs.value.length) void loadTabs()
-})
+  if (ok && props.documentId && !tabs.value.length) void loadTabs();
+});
 
 watch(
   () => props.documentId,
   (id, prev) => {
-    if (id === prev) return
-    resetTabs()
-    if (id) void loadTabs()
+    if (id === prev) return;
+    resetTabs();
+    if (id) void loadTabs();
   },
-)
+);
 
 function closeFloatingOnOutside(event: PointerEvent) {
-  const target = event.target
-  if (!(target instanceof Node)) return
+  const { target } = event;
+  if (!(target instanceof Node)) return;
 
   if (modeMenu.value && !modeWrap.value?.contains(target)) {
-    modeMenu.value = false
+    modeMenu.value = false;
   }
   if (modelMenu.value && !modelWrap.value?.contains(target)) {
-    modelMenu.value = false
+    modelMenu.value = false;
   }
   if (
     historyOpen.value &&
     !historyPanel.value?.contains(target) &&
     !historyBtn.value?.contains(target)
   ) {
-    historyOpen.value = false
+    historyOpen.value = false;
   }
   if (planOpen.value && !planModal.value?.contains(target)) {
-    planOpen.value = false
+    planOpen.value = false;
   }
 }
 
 function onFloatingKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
+  if (event.key !== 'Escape') return;
   if (planOpen.value) {
-    planOpen.value = false
-    return
+    planOpen.value = false;
+    return;
   }
   if (modeMenu.value || modelMenu.value || historyOpen.value) {
-    modeMenu.value = false
-    modelMenu.value = false
-    historyOpen.value = false
+    modeMenu.value = false;
+    modelMenu.value = false;
+    historyOpen.value = false;
   }
 }
 
 const floatingUiOpen = computed(
-  () => modeMenu.value || modelMenu.value || historyOpen.value || planOpen.value,
-)
+  () =>
+    modeMenu.value || modelMenu.value || historyOpen.value || planOpen.value,
+);
 
 watch(
   floatingUiOpen,
   (open, _prev, onCleanup) => {
-    if (!open) return
-    document.addEventListener('pointerdown', closeFloatingOnOutside, true)
-    document.addEventListener('keydown', onFloatingKeydown)
+    if (!open) return;
+    document.addEventListener('pointerdown', closeFloatingOnOutside, true);
+    document.addEventListener('keydown', onFloatingKeydown);
     onCleanup(() => {
-      document.removeEventListener('pointerdown', closeFloatingOnOutside, true)
-      document.removeEventListener('keydown', onFloatingKeydown)
-    })
+      document.removeEventListener('pointerdown', closeFloatingOnOutside, true);
+      document.removeEventListener('keydown', onFloatingKeydown);
+    });
   },
   { flush: 'post' },
-)
+);
 
 onMounted(() => {
-  if (props.documentId) void loadTabs()
-})
+  if (props.documentId) void loadTabs();
+});
 onBeforeUnmount(() => {
   if (contextUsageTimer) {
-    clearTimeout(contextUsageTimer)
-    contextUsageTimer = null
+    clearTimeout(contextUsageTimer);
+    contextUsageTimer = null;
   }
-  document.removeEventListener('pointerdown', closeFloatingOnOutside, true)
-  document.removeEventListener('keydown', onFloatingKeydown)
-  resetTabs()
-})
+  document.removeEventListener('pointerdown', closeFloatingOnOutside, true);
+  document.removeEventListener('keydown', onFloatingKeydown);
+  resetTabs();
+});
 
 function readWidth() {
-  const n = Number(localStorage.getItem(WIDTH_KEY))
-  return Number.isFinite(n) && n >= 320 ? n : 420
+  const n = Number(localStorage.getItem(WIDTH_KEY));
+  return Number.isFinite(n) && n >= 320 ? n : 420;
 }
 
 function renderMd(text: string) {
-  const raw = marked.parse(text || '', { async: false }) as string
+  const raw = marked.parse(text || '', { async: false }) as string;
   const withCopy = raw.replace(
     /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
     (_match, attrs: string, code: string) =>
       `<div class="code-block"><button type="button" class="copy-code" data-copy="1">Копировать</button><pre><code${attrs}>${code}</code></pre></div>`,
-  )
+  );
   return DOMPurify.sanitize(withCopy, {
     ADD_ATTR: ['data-copy'],
     ADD_TAGS: ['button'],
-  })
+  });
 }
 
 async function copyText(text: string, key: string) {
   try {
-    await navigator.clipboard.writeText(text)
-    copiedKey.value = key
-    if (copiedTimer) clearTimeout(copiedTimer)
+    await navigator.clipboard.writeText(text);
+    copiedKey.value = key;
+    if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
-      copiedKey.value = ''
-      copiedTimer = null
-    }, 1500)
+      copiedKey.value = '';
+      copiedTimer = null;
+    }, 1500);
   } catch {
-    attachError.value = 'Не удалось скопировать'
+    attachError.value = 'Не удалось скопировать';
   }
 }
 
 function onTranscriptClick(event: MouseEvent) {
-  const target = event.target as HTMLElement | null
-  const btn = target?.closest?.('.copy-code') as HTMLElement | null
-  if (!btn) return
-  const pre = btn.parentElement?.querySelector('code')
-  const text = pre?.textContent || ''
-  void copyText(text, `code:${text.slice(0, 24)}`)
-  btn.textContent = 'Скопировано'
+  const target = event.target as HTMLElement | null;
+  const btn = target?.closest?.('.copy-code') as HTMLElement | null;
+  if (!btn) return;
+  const pre = btn.parentElement?.querySelector('code');
+  const text = pre?.textContent || '';
+  void copyText(text, `code:${text.slice(0, 24)}`);
+  btn.textContent = 'Скопировано';
   setTimeout(() => {
-    btn.textContent = 'Копировать'
-  }, 1200)
+    btn.textContent = 'Копировать';
+  }, 1200);
 }
 
 function isToolOpen(message: Extract<UiMsg, { role: 'tool' }>) {
-  if (message.status === 'error' || message.status === 'pending') return true
-  return expandedTools.value.has(message.key)
+  if (message.status === 'error' || message.status === 'pending') return true;
+  return expandedTools.value.has(message.key);
 }
 
 function toggleTool(key: string) {
-  const next = new Set(expandedTools.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  expandedTools.value = next
+  const next = new Set(expandedTools.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedTools.value = next;
 }
 
 function applyHint(text: string) {
-  const tab = active.value
-  if (!tab || tab.streaming) return
-  tab.draft = text
+  const tab = active.value;
+  if (!tab || tab.streaming) return;
+  tab.draft = text;
 }
 
 function formatHistoryDate(value: string) {
@@ -569,70 +576,76 @@ function formatHistoryDate(value: string) {
       month: 'short',
       hour: '2-digit',
       minute: '2-digit',
-    })
+    });
   } catch {
-    return value
+    return value;
   }
 }
 
 function visibleUser(text: string) {
-  const idx = text.indexOf('\n\n---\n')
-  return idx === -1 ? text : text.slice(0, idx)
+  const idx = text.indexOf('\n\n---\n');
+  return idx === -1 ? text : text.slice(0, idx);
 }
 
 function asMode(value: string): ChatMode {
-  if (value === 'chat' || value === 'plan' || value === 'agent') return value
-  return 'agent'
+  if (value === 'chat' || value === 'plan' || value === 'agent') return value;
+  return 'agent';
 }
 
 function modeLabel(mode: ChatMode) {
-  if (mode === 'plan') return 'План'
-  if (mode === 'chat') return 'Чат'
-  return 'Агент'
+  if (mode === 'plan') return 'План';
+  if (mode === 'chat') return 'Чат';
+  return 'Агент';
 }
 
 function compact(n: number) {
-  if (n >= 1000) return `${Math.max(1, Math.round(n / 1000))}K`
-  return String(Math.max(0, Math.round(n)))
+  if (n >= 1000) return `${Math.max(1, Math.round(n / 1000))}K`;
+  return String(Math.max(0, Math.round(n)));
 }
 
 function titleFromMarkdown(markdown: string, fallback: string) {
-  const heading = markdown.match(/^#\s+(.+)$/m)
-  return (heading?.[1] || fallback).trim() || 'План'
+  const heading = markdown.match(/^#\s+(.+)$/m);
+  return (heading?.[1] || fallback).trim() || 'План';
 }
 
 function shortTitle(text: string) {
-  const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return 'Новый чат'
-  return clean.length > 22 ? `${clean.slice(0, 22)}…` : clean
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (!clean) return 'Новый чат';
+  return clean.length > 22 ? `${clean.slice(0, 22)}…` : clean;
 }
 
 function planWasExecuted(record: ChatRecord): boolean {
-  if (record.planExecuted === true) return true
-  if (record.planExecuted === false) return false
-  let lastCreate = -1
-  let lastRun = -1
+  if (record.planExecuted === true) return true;
+  if (record.planExecuted === false) return false;
+  let lastCreate = -1;
+  let lastRun = -1;
   record.messages.forEach((message, index) => {
-    if (message.role === 'tool' && message.toolName === 'create_plan') lastCreate = index
-    if (message.role === 'user' && message.content.startsWith('Сделать по плану')) {
-      lastRun = index
+    if (message.role === 'tool' && message.toolName === 'create_plan')
+      lastCreate = index;
+    if (
+      message.role === 'user' &&
+      message.content.startsWith('Сделать по плану')
+    ) {
+      lastRun = index;
     }
-  })
-  if (lastRun < 0 || lastRun < lastCreate) return false
+  });
+  if (lastRun < 0 || lastRun < lastCreate) return false;
   const assistant = [...record.messages.slice(lastRun + 1)]
     .reverse()
-    .find((message) => message.role === 'assistant')
-  if (!assistant) return false
-  return !/Остановлено|Отклонено/.test(assistant.content)
+    .find((message) => message.role === 'assistant');
+  if (!assistant) return false;
+  return !/Остановлено|Отклонено/.test(assistant.content);
 }
 
 function tabFromRecord(record: ChatRecord): Tab {
-  const providerId = record.providerId || providers.value[0]?.id || ''
+  const providerId = record.providerId || providers.value[0]?.id || '';
   const providerModel =
     providers.value.find((item) => item.id === providerId)?.model ||
     providers.value[0]?.model ||
-    ''
-  const plan = record.planMarkdown ? parsePlanMarkdown(record.planMarkdown) : null
+    '';
+  const plan = record.planMarkdown
+    ? parsePlanMarkdown(record.planMarkdown)
+    : null;
   return {
     id: record.id,
     title: record.title || 'Новый чат',
@@ -647,7 +660,8 @@ function tabFromRecord(record: ChatRecord): Tab {
     planTitle: record.planTitle,
     planMarkdown: record.planMarkdown,
     planEdited: false,
-    planRunState: planWasExecuted(record) || planAllTodosDone(plan) ? 'done' : 'idle',
+    planRunState:
+      planWasExecuted(record) || planAllTodosDone(plan) ? 'done' : 'idle',
     streaming: false,
     tokenRate: null,
     tokenMeta: null,
@@ -659,7 +673,7 @@ function tabFromRecord(record: ChatRecord): Tab {
     abort: null,
     allowedTools: new Set(),
     pendingApprove: null,
-  }
+  };
 }
 
 function messageFromRecord(row: ChatRecord['messages'][number]): UiMsg {
@@ -672,598 +686,641 @@ function messageFromRecord(row: ChatRecord['messages'][number]): UiMsg {
       full: row.content,
       status: row.toolStatus === 'error' ? 'error' : 'ok',
       toolCallId: row.toolCallId || '',
-    }
+    };
   }
   if (row.role === 'assistant') {
-    let toolCalls: ToolCall[] | undefined
+    let toolCalls: ToolCall[] | undefined;
     if (row.toolCallsJson) {
       try {
-        toolCalls = JSON.parse(row.toolCallsJson) as ToolCall[]
+        toolCalls = JSON.parse(row.toolCallsJson) as ToolCall[];
       } catch {
-        toolCalls = undefined
+        toolCalls = undefined;
       }
     }
-    return { key: row.id, role: 'assistant', content: row.content, toolCalls }
+    return { key: row.id, role: 'assistant', content: row.content, toolCalls };
   }
   return {
     key: row.id,
     role: 'user',
     content: visibleUser(row.content),
     wire: row.content,
-  }
+  };
 }
 
 async function loadTabs() {
-  if (!hasProvider.value || !props.documentId) return
-  const forDoc = props.documentId
+  if (!hasProvider.value || !props.documentId) return;
+  const forDoc = props.documentId;
   try {
-    const rows = await api.listOpenChats(forDoc)
-    if (props.documentId !== forDoc) return
+    const rows = await api.listOpenChats(forDoc);
+    if (props.documentId !== forDoc) return;
     tabs.value = rows.map((record) => {
-      const tab = tabFromRecord(record)
+      const tab = tabFromRecord(record);
       if (record.planExecuted == null && tab.planRunState === 'done') {
-        void patchTab(tab, { planExecuted: true })
+        void patchTab(tab, { planExecuted: true });
       }
-      return tab
-    })
-    activeId.value = tabs.value[0]?.id || ''
-    await ensureDefaultModel()
+      return tab;
+    });
+    activeId.value = tabs.value[0]?.id || '';
+    await ensureDefaultModel();
   } catch (e) {
-    if (props.documentId !== forDoc) return
-    attachError.value = e instanceof Error ? e.message : 'Не удалось открыть чаты'
+    if (props.documentId !== forDoc) return;
+    attachError.value =
+      e instanceof Error ? e.message : 'Не удалось открыть чаты';
   }
 }
 
 function findTab(id: string) {
-  return tabs.value.find((tab) => tab.id === id)
+  return tabs.value.find((tab) => tab.id === id);
 }
 
 async function addTab() {
-  if (!props.documentId) return
+  if (!props.documentId) return;
   const created = await api.createChat({
     mode: active.value?.mode || 'agent',
     providerId: active.value?.providerId || providers.value[0]?.id,
     model: active.value?.model || undefined,
     documentId: props.documentId,
-  })
-  tabs.value.push(tabFromRecord(created))
-  activeId.value = created.id
-  await ensureDefaultModel()
+  });
+  tabs.value.push(tabFromRecord(created));
+  activeId.value = created.id;
+  await ensureDefaultModel();
 }
 
 async function closeTab(id: string) {
-  const tab = findTab(id)
-  if (!tab) return
-  tab.abort?.abort()
-  tab.pendingApprove?.resolve(false)
+  const tab = findTab(id);
+  if (!tab) return;
+  tab.abort?.abort();
+  tab.pendingApprove?.resolve(false);
   if (renamingId.value === id) {
-    renamingId.value = ''
-    renameDraft.value = ''
+    renamingId.value = '';
+    renameDraft.value = '';
   }
   try {
-    const result = await api.closeChat(id)
-    tabs.value = tabs.value.filter((item) => item.id !== id)
-    if (result.chat) tabs.value.push(tabFromRecord(result.chat))
+    const result = await api.closeChat(id);
+    tabs.value = tabs.value.filter((item) => item.id !== id);
+    if (result.chat) tabs.value.push(tabFromRecord(result.chat));
     if (!tabs.value.some((item) => item.id === activeId.value)) {
-      activeId.value = tabs.value[0]?.id || ''
+      activeId.value = tabs.value[0]?.id || '';
     }
-    if (historyOpen.value) void loadHistory()
-    await ensureDefaultModel()
+    if (historyOpen.value) void loadHistory();
+    await ensureDefaultModel();
   } catch (e) {
-    attachError.value = e instanceof Error ? e.message : 'Не удалось закрыть чат'
+    attachError.value =
+      e instanceof Error ? e.message : 'Не удалось закрыть чат';
   }
 }
 
 async function loadHistory() {
-  if (!props.documentId) return
-  historyLoading.value = true
-  historyError.value = ''
+  if (!props.documentId) return;
+  historyLoading.value = true;
+  historyError.value = '';
   try {
-    historyItems.value = await api.listClosedChats(props.documentId)
+    historyItems.value = await api.listClosedChats(props.documentId);
   } catch (e) {
-    historyError.value = e instanceof Error ? e.message : 'Не удалось загрузить историю'
+    historyError.value =
+      e instanceof Error ? e.message : 'Не удалось загрузить историю';
   } finally {
-    historyLoading.value = false
+    historyLoading.value = false;
   }
 }
 
 async function toggleHistory() {
-  historyOpen.value = !historyOpen.value
-  modeMenu.value = false
-  modelMenu.value = false
-  if (historyOpen.value) await loadHistory()
+  historyOpen.value = !historyOpen.value;
+  modeMenu.value = false;
+  modelMenu.value = false;
+  if (historyOpen.value) await loadHistory();
 }
 
 async function reopenChat(id: string) {
   try {
-    const record = await api.updateChat(id, { pinnedOpen: true })
+    const record = await api.updateChat(id, { pinnedOpen: true });
     if (!tabs.value.some((tab) => tab.id === record.id)) {
-      tabs.value.push(tabFromRecord(record))
+      tabs.value.push(tabFromRecord(record));
     }
-    activeId.value = record.id
-    historyOpen.value = false
-    historyItems.value = historyItems.value.filter((item) => item.id !== id)
-    await ensureDefaultModel()
+    activeId.value = record.id;
+    historyOpen.value = false;
+    historyItems.value = historyItems.value.filter((item) => item.id !== id);
+    await ensureDefaultModel();
   } catch (e) {
-    historyError.value = e instanceof Error ? e.message : 'Не удалось открыть чат'
+    historyError.value =
+      e instanceof Error ? e.message : 'Не удалось открыть чат';
   }
 }
 
 async function deleteFromHistory(id: string) {
-  const item = historyItems.value.find((row) => row.id === id)
+  const item = historyItems.value.find((row) => row.id === id);
   const ok = await uiConfirm({
     title: 'Удалить чат?',
     message: item?.title
       ? `Чат «${item.title}» будет удалён безвозвратно.`
       : 'Чат будет удалён безвозвратно.',
     confirmLabel: 'Удалить',
-  })
-  if (!ok) return
+  });
+  if (!ok) return;
   try {
-    await api.deleteChat(id)
-    historyItems.value = historyItems.value.filter((row) => row.id !== id)
+    await api.deleteChat(id);
+    historyItems.value = historyItems.value.filter((row) => row.id !== id);
   } catch (e) {
-    historyError.value = e instanceof Error ? e.message : 'Не удалось удалить чат'
+    historyError.value =
+      e instanceof Error ? e.message : 'Не удалось удалить чат';
   }
 }
 
 function startRename(tab: Tab) {
-  renamingId.value = tab.id
-  renameDraft.value = tab.title
+  renamingId.value = tab.id;
+  renameDraft.value = tab.title;
   void nextTick(() => {
     const input = document.querySelector(
       `.tab-rename[data-id="${tab.id}"]`,
-    ) as HTMLInputElement | null
-    input?.focus()
-    input?.select()
-  })
+    ) as HTMLInputElement | null;
+    input?.focus();
+    input?.select();
+  });
 }
 
 function cancelRename() {
-  renamingId.value = ''
-  renameDraft.value = ''
+  renamingId.value = '';
+  renameDraft.value = '';
 }
 
 async function commitRename(tab: Tab) {
-  if (renamingId.value !== tab.id) return
-  const next = renameDraft.value.replace(/\s+/g, ' ').trim() || 'Новый чат'
-  renamingId.value = ''
-  renameDraft.value = ''
-  if (next === tab.title) return
-  tab.title = next
-  await patchTab(tab, { title: next })
+  if (renamingId.value !== tab.id) return;
+  const next = renameDraft.value.replace(/\s+/g, ' ').trim() || 'Новый чат';
+  renamingId.value = '';
+  renameDraft.value = '';
+  const target = findTab(tab.id);
+  if (!target || next === target.title) return;
+  target.title = next;
+  await patchTab(target, { title: next });
 }
 
 function onRenameKey(event: KeyboardEvent, tab: Tab) {
   if (event.key === 'Enter') {
-    event.preventDefault()
-    void commitRename(tab)
+    event.preventDefault();
+    void commitRename(tab);
   }
   if (event.key === 'Escape') {
-    event.preventDefault()
-    cancelRename()
+    event.preventDefault();
+    cancelRename();
   }
 }
 
 async function patchTab(tab: Tab, body: Record<string, unknown>) {
   try {
-    await api.updateChat(tab.id, body)
+    await api.updateChat(tab.id, body);
   } catch (e) {
-    console.error(e)
+    console.error(e);
   }
 }
 
 function setMode(mode: ChatMode) {
-  const tab = active.value
-  modeMenu.value = false
-  if (!tab || tab.mode === mode) return
-  tab.mode = mode
-  void patchTab(tab, { mode })
+  const tab = active.value;
+  modeMenu.value = false;
+  if (!tab || tab.mode === mode) return;
+  tab.mode = mode;
+  void patchTab(tab, { mode });
 }
 
 async function toggleModelMenu() {
-  modeMenu.value = false
-  historyOpen.value = false
-  modelMenu.value = !modelMenu.value
-  if (!modelMenu.value) return
-  await loadModelOptions()
+  modeMenu.value = false;
+  historyOpen.value = false;
+  modelMenu.value = !modelMenu.value;
+  if (!modelMenu.value) return;
+  await loadModelOptions();
 }
 
 async function loadModelOptions() {
-  modelMenuLoading.value = true
-  modelMenuError.value = ''
+  modelMenuLoading.value = true;
+  modelMenuError.value = '';
   try {
-    const errors: string[] = []
+    const errors: string[] = [];
     const rows = await Promise.all(
       providers.value.map(async (provider) => {
         try {
-          const res = await api.listProviderModels(provider.id)
+          const res = await api.listProviderModels(provider.id);
           return res.models.map((model) => ({
             providerId: provider.id,
             provider: provider.provider,
             model,
-          }))
+          }));
         } catch (e) {
-          const msg = e instanceof Error ? e.message : 'Ошибка загрузки моделей'
+          const msg =
+            e instanceof Error ? e.message : 'Ошибка загрузки моделей';
           errors.push(
             providers.value.length > 1 ? `${provider.provider}: ${msg}` : msg,
-          )
-          return [] as ModelOption[]
+          );
+          return [] as ModelOption[];
         }
       }),
-    )
-    modelOptions.value = rows.flat()
+    );
+    modelOptions.value = rows.flat();
     if (!modelOptions.value.length) {
-      modelMenuError.value =
-        errors[0] || 'Не удалось загрузить модели'
+      modelMenuError.value = errors[0] || 'Не удалось загрузить модели';
     }
   } finally {
-    modelMenuLoading.value = false
+    modelMenuLoading.value = false;
   }
 }
 
 function setModel(option: ModelOption) {
-  const tab = active.value
-  modelMenu.value = false
-  if (!tab) return
-  tab.providerId = option.providerId
-  tab.model = option.model
-  void patchTab(tab, { providerId: option.providerId, model: option.model })
+  const tab = active.value;
+  modelMenu.value = false;
+  if (!tab) return;
+  tab.providerId = option.providerId;
+  tab.model = option.model;
+  void patchTab(tab, { providerId: option.providerId, model: option.model });
 }
 
 async function ensureDefaultModel() {
-  const tab = active.value
-  if (!tab || tab.model || !providers.value.length) return
-  if (!modelOptions.value.length) await loadModelOptions()
-  const first = modelOptions.value[0]
-  if (first) setModel(first)
+  const tab = active.value;
+  if (!tab || tab.model || !providers.value.length) return;
+  if (!modelOptions.value.length) await loadModelOptions();
+  const first = modelOptions.value[0];
+  if (first) setModel(first);
 }
 
 function modelLabel(tab: Tab) {
-  if (tab.model) return tab.model
-  return 'модель'
+  if (tab.model) return tab.model;
+  return 'модель';
 }
 
 function pickAttach() {
-  fileInput.value?.click()
+  fileInput.value?.click();
 }
 
 async function onAttach(e: Event) {
-  const inputEl = e.target as HTMLInputElement
-  const file = inputEl.files?.[0]
-  inputEl.value = ''
-  const tab = active.value
-  if (!file || !tab) return
-  attachError.value = ''
+  const inputEl = e.target as HTMLInputElement;
+  const file = inputEl.files?.[0];
+  inputEl.value = '';
+  const tab = active.value;
+  if (!file || !tab) return;
+  attachError.value = '';
   try {
-    const extracted = await api.extractAttachment(file)
-    tab.attachments.push(extracted)
+    const extracted = await api.extractAttachment(file);
+    tab.attachments.push(extracted);
   } catch (err) {
-    attachError.value = err instanceof Error ? err.message : 'Не удалось прочитать файл'
+    attachError.value =
+      err instanceof Error ? err.message : 'Не удалось прочитать файл';
   }
 }
 
 function removeAttach(index: number) {
-  active.value?.attachments.splice(index, 1)
+  active.value?.attachments.splice(index, 1);
 }
 
 function clearStreamHtml() {
   if (streamHtmlTimer) {
-    clearTimeout(streamHtmlTimer)
-    streamHtmlTimer = null
+    clearTimeout(streamHtmlTimer);
+    streamHtmlTimer = null;
   }
-  streamHtmlKey.value = ''
-  streamHtml.value = ''
+  streamHtmlKey.value = '';
+  streamHtml.value = '';
 }
 
 function flushStreamHtml(key: string, content: string) {
-  streamHtmlKey.value = key
-  streamHtml.value = renderMd(content)
+  streamHtmlKey.value = key;
+  streamHtml.value = renderMd(content);
 }
 
 function scheduleStreamHtml(key: string, content: string) {
   if (!streamHtmlTimer) {
     streamHtmlTimer = setTimeout(() => {
-      streamHtmlTimer = null
-      flushStreamHtml(key, content)
-    }, STREAM_HTML_MS)
-    return
+      streamHtmlTimer = null;
+      flushStreamHtml(key, content);
+    }, STREAM_HTML_MS);
+    return;
   }
   // Keep latest content for the pending flush
-  const pendingKey = key
-  const pendingContent = content
-  clearTimeout(streamHtmlTimer)
+  const pendingKey = key;
+  const pendingContent = content;
+  clearTimeout(streamHtmlTimer);
   streamHtmlTimer = setTimeout(() => {
-    streamHtmlTimer = null
-    flushStreamHtml(pendingKey, pendingContent)
-  }, STREAM_HTML_MS)
+    streamHtmlTimer = null;
+    flushStreamHtml(pendingKey, pendingContent);
+  }, STREAM_HTML_MS);
 }
 
 function assistantHtml(message: Extract<UiMsg, { role: 'assistant' }>) {
   if (message.key === streamHtmlKey.value && streamHtml.value) {
-    return streamHtml.value
+    return streamHtml.value;
   }
-  return renderMd(message.content)
+  return renderMd(message.content);
 }
 
 function askApprove(tab: Tab, name: string, args: Record<string, unknown>) {
   return new Promise<boolean>((resolve) => {
-    if (tab.abort?.signal.aborted) {
-      resolve(false)
-      return
+    const target = findTab(tab.id) ?? tab;
+    if (target.abort?.signal.aborted) {
+      resolve(false);
+      return;
     }
-    let settled = false
-    const finish = (ok: boolean) => {
-      if (settled) return
-      settled = true
-      tab.abort?.signal.removeEventListener('abort', onAbort)
-      if (tab.pendingApprove) tab.pendingApprove = null
-      approveExpanded.value = false
-      resolve(ok)
+    let settled = false;
+    function onAbort() {
+      finish(false);
     }
-    const onAbort = () => finish(false)
-    tab.abort?.signal.addEventListener('abort', onAbort, { once: true })
-    const summary = describeImpact(name, args, props.univerApi ?? null)
-    tab.pendingApprove = { name, args, summary, resolve: finish }
-  })
+    function finish(ok: boolean) {
+      if (settled) return;
+      settled = true;
+      target.abort?.signal.removeEventListener('abort', onAbort);
+      if (target.pendingApprove) target.pendingApprove = null;
+      approveExpanded.value = false;
+      resolve(ok);
+    }
+    target.abort?.signal.addEventListener('abort', onAbort, { once: true });
+    const summary = describeImpact(name, args, props.univerApi ?? null);
+    target.pendingApprove = { name, args, summary, resolve: finish };
+  });
 }
 
 function resolveApprove(ok: boolean, always = false) {
-  const tab = active.value
+  const tab = active.value;
   if (tab?.pendingApprove) {
-    if (always && ok) tab.allowedTools.add(tab.pendingApprove.name)
+    if (always && ok) tab.allowedTools.add(tab.pendingApprove.name);
+    let decision = 'rejected';
+    if (always && ok) decision = 'always';
+    else if (ok) decision = 'accepted';
     pushSessionLog(tab, {
       kind: 'system',
       name: 'approve',
       content: JSON.stringify({
         tool: tab.pendingApprove.name,
         args: tab.pendingApprove.args,
-        decision: always && ok ? 'always' : ok ? 'accepted' : 'rejected',
+        decision,
       }),
       status: ok ? 'ok' : 'error',
-    })
+    });
   }
-  tab?.pendingApprove?.resolve(ok)
-  if (tab) tab.pendingApprove = null
-  approveExpanded.value = false
+  tab?.pendingApprove?.resolve(ok);
+  if (tab) tab.pendingApprove = null;
+  approveExpanded.value = false;
 }
 
 function openPlan() {
-  if (!active.value?.planMarkdown) return
-  planDraft.value = active.value.planMarkdown
-  planOpen.value = true
+  if (!active.value?.planMarkdown) return;
+  planDraft.value = active.value.planMarkdown;
+  planOpen.value = true;
 }
 
 async function savePlan() {
-  const tab = active.value
-  if (!tab) return
-  tab.planMarkdown = planDraft.value
-  tab.planTitle = titleFromMarkdown(planDraft.value, tab.planTitle || 'План')
-  tab.plan = parsePlanMarkdown(planDraft.value)
-  tab.planEdited = true
-  tab.planRunState = 'idle'
-  planOpen.value = false
+  const tab = active.value;
+  if (!tab) return;
+  tab.planMarkdown = planDraft.value;
+  tab.planTitle = titleFromMarkdown(planDraft.value, tab.planTitle || 'План');
+  tab.plan = parsePlanMarkdown(planDraft.value);
+  tab.planEdited = true;
+  tab.planRunState = 'idle';
+  planOpen.value = false;
   await patchTab(tab, {
     planTitle: tab.planTitle,
     planMarkdown: tab.planMarkdown,
     planExecuted: false,
-  })
+  });
 }
 
 async function runPlan() {
-  const tab = active.value
-  if (!tab?.planMarkdown || tab.streaming) return
-  if (!tab.plan) tab.plan = parsePlanMarkdown(tab.planMarkdown)
-  const title = tab.planTitle || tab.plan.name || 'План'
-  tab.mode = 'agent'
-  tab.executingPlan = true
-  tab.planRunState = 'running'
-  await patchTab(tab, { mode: 'agent' })
+  const tab = active.value;
+  if (!tab?.planMarkdown || tab.streaming) return;
+  if (!tab.plan) tab.plan = parsePlanMarkdown(tab.planMarkdown);
+  const title = tab.planTitle || tab.plan.name || 'План';
+  tab.mode = 'agent';
+  tab.executingPlan = true;
+  tab.planRunState = 'running';
+  await patchTab(tab, { mode: 'agent' });
   try {
     await send({
       display: `Сделать по плану «${title}»`,
       wire: `Сделать по плану «${title}»\n\n---\n${tab.planMarkdown}`,
-    })
+    });
     const stopped =
-      tab.retryReason === 'Остановлено' || tab.retryReason === 'Отклонено'
+      tab.retryReason === 'Остановлено' || tab.retryReason === 'Отклонено';
     if (stopped) {
-      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle'
+      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle';
     } else {
-      tab.planRunState = 'done'
-      void patchTab(tab, { planExecuted: true })
+      tab.planRunState = 'done';
+      void patchTab(tab, { planExecuted: true });
     }
   } finally {
-    tab.executingPlan = false
+    tab.executingPlan = false;
     if (tab.planRunState === 'running') {
-      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle'
+      tab.planRunState = planAllTodosDone(tab.plan) ? 'done' : 'idle';
     }
   }
 }
 
 function goSettings() {
-  void router.push('/home')
-  auth.openSettings()
+  void router.push('/home');
+  auth.openSettings();
 }
 
 async function send(preset?: { display: string; wire: string }) {
-  const tab = active.value
-  if (!tab || tab.streaming || !hasProvider.value) return
-  const display = (preset?.display ?? tab.draft).trim()
-  if (!display) return
+  const tab = active.value;
+  if (!tab || tab.streaming || !hasProvider.value) return;
+  const display = (preset?.display ?? tab.draft).trim();
+  if (!display) return;
   if (!tab.model) {
-    attachError.value = 'Выберите модель в чате ассистента'
-    void toggleModelMenu()
-    return
+    attachError.value = 'Выберите модель в чате ассистента';
+    void toggleModelMenu();
+    return;
   }
-  const contextParts: string[] = []
+  const contextParts: string[] = [];
   if (tab.includeDoc && props.docName) {
-    contextParts.push(`Текущий документ: ${props.docName} (${props.docType})`)
-    const sel = props.getSelectionContext?.()
-    if (sel) contextParts.push(sel)
+    contextParts.push(`Текущий документ: ${props.docName} (${props.docType})`);
+    const sel = props.getSelectionContext?.();
+    if (sel) contextParts.push(sel);
   }
   if (!preset) {
-    for (const file of tab.attachments) {
-      contextParts.push(`Файл ${file.name}:\n${file.text}`)
-    }
+    tab.attachments.forEach((file) => {
+      contextParts.push(`Файл ${file.name}:\n${file.text}`);
+    });
   }
   const contextBlock = contextParts.length
     ? `\n\n---\nКонтекст:\n${contextParts.join('\n\n')}`
-    : ''
-  const wire = preset?.wire
-    ? `${preset.wire}${tab.includeDoc && contextParts.length ? contextBlock : ''}`
-    : contextParts.length
-      ? `${display}${contextBlock}`
-      : display
-
-  tab.messages.push({ key: crypto.randomUUID(), role: 'user', content: display, wire })
-  if (tab.title === 'Новый чат') {
-    tab.title = shortTitle(display)
-    void patchTab(tab, { title: tab.title })
+    : '';
+  let wire = display;
+  if (preset?.wire) {
+    wire = `${preset.wire}${tab.includeDoc && contextParts.length ? contextBlock : ''}`;
+  } else if (contextParts.length) {
+    wire = `${display}${contextBlock}`;
   }
-  pushSessionLog(tab, { kind: 'user', content: wire })
-  tab.draft = ''
-  tab.attachments = []
-  void nextTick(resizeComposer)
-  tab.streaming = true
-  tab.tokenRate = null
-  tab.tokenMeta = null
-  tab.showCheckpoint = false
-  tab.wroteSinceCheckpoint = false
-  tab.canRetry = false
-  tab.retryReason = null
-  clearStreamHtml()
-  lastTokenRateAt = 0
-  const controller = new AbortController()
-  tab.abort = controller
-  if (props.univerApi) emit('checkpoint')
-  void api.addChatMessage(tab.id, { role: 'user', content: wire })
+
+  tab.messages.push({
+    key: crypto.randomUUID(),
+    role: 'user',
+    content: display,
+    wire,
+  });
+  if (tab.title === 'Новый чат') {
+    tab.title = shortTitle(display);
+    void patchTab(tab, { title: tab.title });
+  }
+  pushSessionLog(tab, { kind: 'user', content: wire });
+  tab.draft = '';
+  tab.attachments = [];
+  void nextTick(resizeComposer);
+  tab.streaming = true;
+  tab.tokenRate = null;
+  tab.tokenMeta = null;
+  tab.showCheckpoint = false;
+  tab.wroteSinceCheckpoint = false;
+  tab.canRetry = false;
+  tab.retryReason = null;
+  clearStreamHtml();
+  lastTokenRateAt = 0;
+  const controller = new AbortController();
+  tab.abort = controller;
+  if (props.univerApi) emit('checkpoint');
+  void api.addChatMessage(tab.id, { role: 'user', content: wire });
 
   try {
-    const reason = await agentLoop(tab.id)
-    const label = retryLabel(reason)
+    const reason = await agentLoop(tab.id);
+    const label = retryLabel(reason);
     if (label) {
-      tab.canRetry = true
-      tab.retryReason = label
+      tab.canRetry = true;
+      tab.retryReason = label;
     }
   } catch (e) {
-    const aborted = e instanceof DOMException && e.name === 'AbortError'
+    const aborted = e instanceof DOMException && e.name === 'AbortError';
     if (!aborted) {
-      const content = e instanceof Error ? e.message : 'Ошибка'
+      const content = e instanceof Error ? e.message : 'Ошибка';
       tab.messages.push({
         key: crypto.randomUUID(),
         role: 'assistant',
         content,
-      })
-      pushSessionLog(tab, { kind: 'system', name: 'error', content, status: 'error' })
-      tab.canRetry = true
-      tab.retryReason = 'Ошибка сети'
+      });
+      pushSessionLog(tab, {
+        kind: 'system',
+        name: 'error',
+        content,
+        status: 'error',
+      });
+      tab.canRetry = true;
+      tab.retryReason = 'Ошибка сети';
     } else {
       pushSessionLog(tab, {
         kind: 'system',
         name: 'abort',
         content: 'Остановлено пользователем',
         status: 'error',
-      })
-      tab.canRetry = true
-      tab.retryReason = 'Остановлено'
+      });
+      tab.canRetry = true;
+      tab.retryReason = 'Остановлено';
     }
   } finally {
-    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi)
-    tab.streaming = false
-    tab.abort = null
-    clearStreamHtml()
+    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi);
+    tab.streaming = false;
+    tab.abort = null;
+    clearStreamHtml();
   }
 }
 
 async function retryTurn() {
-  const tab = active.value
-  if (!tab || tab.streaming || !tab.canRetry) return
-  tab.canRetry = false
-  tab.retryReason = null
-  tab.streaming = true
-  tab.tokenRate = null
-  tab.tokenMeta = null
-  tab.showCheckpoint = false
-  clearStreamHtml()
-  lastTokenRateAt = 0
-  const controller = new AbortController()
-  tab.abort = controller
-  if (props.univerApi) emit('checkpoint')
+  const tab = active.value;
+  if (!tab || tab.streaming || !tab.canRetry) return;
+  tab.canRetry = false;
+  tab.retryReason = null;
+  tab.streaming = true;
+  tab.tokenRate = null;
+  tab.tokenMeta = null;
+  tab.showCheckpoint = false;
+  clearStreamHtml();
+  lastTokenRateAt = 0;
+  const controller = new AbortController();
+  tab.abort = controller;
+  if (props.univerApi) emit('checkpoint');
   try {
-    const reason = await agentLoop(tab.id)
-    const label = retryLabel(reason)
+    const reason = await agentLoop(tab.id);
+    const label = retryLabel(reason);
     if (label) {
-      tab.canRetry = true
-      tab.retryReason = label
+      tab.canRetry = true;
+      tab.retryReason = label;
     }
   } catch (e) {
-    const aborted = e instanceof DOMException && e.name === 'AbortError'
+    const aborted = e instanceof DOMException && e.name === 'AbortError';
     if (!aborted) {
-      const content = e instanceof Error ? e.message : 'Ошибка'
+      const content = e instanceof Error ? e.message : 'Ошибка';
       tab.messages.push({
         key: crypto.randomUUID(),
         role: 'assistant',
         content,
-      })
-      pushSessionLog(tab, { kind: 'system', name: 'error', content, status: 'error' })
-      tab.canRetry = true
-      tab.retryReason = 'Ошибка сети'
+      });
+      pushSessionLog(tab, {
+        kind: 'system',
+        name: 'error',
+        content,
+        status: 'error',
+      });
+      tab.canRetry = true;
+      tab.retryReason = 'Ошибка сети';
     } else {
-      tab.canRetry = true
-      tab.retryReason = 'Остановлено'
+      tab.canRetry = true;
+      tab.retryReason = 'Остановлено';
     }
   } finally {
-    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi)
-    tab.streaming = false
-    tab.abort = null
-    clearStreamHtml()
+    tab.showCheckpoint = tab.wroteSinceCheckpoint && Boolean(props.univerApi);
+    tab.streaming = false;
+    tab.abort = null;
+    clearStreamHtml();
   }
 }
 
 function stop() {
-  const tab = active.value
-  if (!tab) return
-  tab.abort?.abort()
+  const tab = active.value;
+  if (!tab) return;
+  tab.abort?.abort();
   if (tab.pendingApprove) {
-    tab.pendingApprove.resolve(false)
-    tab.pendingApprove = null
-    approveExpanded.value = false
+    tab.pendingApprove.resolve(false);
+    tab.pendingApprove = null;
+    approveExpanded.value = false;
   }
 }
 
+/* eslint-disable no-await-in-loop, no-restricted-syntax -- ordered agent/tool stream processing */
 async function agentLoop(tabId: string): Promise<LoopStopReason> {
-  const tab = findTab(tabId)
-  if (!tab) return null
-  const signal = tab.abort?.signal
-  let steps = 0
-  let lastToolSig = ''
-  let repeats = 0
-  let consecutiveToolErrors = 0
+  const tab = findTab(tabId);
+  if (!tab) return null;
+  const signal = tab.abort?.signal;
+  let steps = 0;
+  let lastToolSig = '';
+  let repeats = 0;
+  let consecutiveToolErrors = 0;
 
   while (steps < 25) {
-    if (signal?.aborted) return 'aborted'
-    steps++
-    const hasDocument = Boolean(props.documentId || props.docName)
-    const docType = props.docType === 'DOC' ? 'DOC' : 'SHEET'
-    const tools = toolsForMode(tab.mode, tab.executingPlan, hasDocument, docType)
+    if (signal?.aborted) return 'aborted';
+    steps += 1;
+    const hasDocument = Boolean(props.documentId || props.docName);
+    const docType = props.docType === 'DOC' ? 'DOC' : 'SHEET';
+    const tools = toolsForMode(
+      tab.mode,
+      tab.executingPlan,
+      hasDocument,
+      docType,
+    );
     if (tools.length && !props.univerApi) {
-      const content = 'Редактор ещё загружается, повторите.'
+      const content = 'Редактор ещё загружается, повторите.';
       tab.messages.push({
         key: crypto.randomUUID(),
         role: 'assistant',
         content,
-      })
-      pushSessionLog(tab, { kind: 'system', name: 'editor', content, status: 'error' })
-      return 'editor'
+      });
+      pushSessionLog(tab, {
+        kind: 'system',
+        name: 'editor',
+        content,
+        status: 'error',
+      });
+      return 'editor';
     }
-    const started = performance.now()
-    let chars = 0
-    const assistant: { content: string; toolCalls: ToolCall[] } = { content: '', toolCalls: [] }
-    let assistantKey = ''
-    let usagePrompt: number | null = null
-    let usageCompletion: number | null = null
-    const messages = trimWireForProvider(toWire(tab))
-    const heuristicPrompt = JSON.stringify(messages).length / 4
+    const started = performance.now();
+    let chars = 0;
+    const assistant: { content: string; toolCalls: ToolCall[] } = {
+      content: '',
+      toolCalls: [],
+    };
+    let assistantKey = '';
+    let usagePrompt: number | null = null;
+    let usageCompletion: number | null = null;
+    const messages = trimWireForProvider(toWire(tab));
+    const heuristicPrompt = JSON.stringify(messages).length / 4;
     const promptEstimate = estimateChatContextUsage({
       mode: tab.mode,
       model: tab.model,
@@ -1275,7 +1332,8 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
       hasDocument: Boolean(props.documentId || props.docName),
       docType: props.docType,
       calibrator: chatTokenCalibrator,
-    }).usedTokens
+    }).usedTokens;
+    const rateClock = { lastAt: lastTokenRateAt };
 
     try {
       await streamChat(
@@ -1290,108 +1348,120 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
         },
         (ev) => {
           if (ev.type === 'delta' && typeof ev.content === 'string') {
-            assistant.content += ev.content
-            chars += ev.content.length
-            const now = performance.now()
-            if (now - lastTokenRateAt >= TOKEN_RATE_MS) {
-              lastTokenRateAt = now
-              const seconds = Math.max(0.2, (now - started) / 1000)
-              tab.tokenRate = Math.round(chars / 4 / seconds)
+            assistant.content += ev.content;
+            chars += ev.content.length;
+            const now = performance.now();
+            if (now - rateClock.lastAt >= TOKEN_RATE_MS) {
+              rateClock.lastAt = now;
+              const seconds = Math.max(0.2, (now - started) / 1000);
+              tab.tokenRate = Math.round(chars / 4 / seconds);
             }
             if (!assistantKey) {
-              assistantKey = crypto.randomUUID()
+              assistantKey = crypto.randomUUID();
               tab.messages.push({
                 key: assistantKey,
                 role: 'assistant',
                 content: assistant.content,
-              })
-              flushStreamHtml(assistantKey, assistant.content)
+              });
+              flushStreamHtml(assistantKey, assistant.content);
             } else {
               const row = tab.messages.find(
-                (item) => item.key === assistantKey && item.role === 'assistant',
-              )
-              if (row && row.role === 'assistant') row.content = assistant.content
-              scheduleStreamHtml(assistantKey, assistant.content)
+                (item) =>
+                  item.key === assistantKey && item.role === 'assistant',
+              );
+              if (row && row.role === 'assistant')
+                row.content = assistant.content;
+              scheduleStreamHtml(assistantKey, assistant.content);
             }
           }
           if (ev.type === 'usage') {
             usagePrompt =
-              typeof ev.promptTokens === 'number' ? ev.promptTokens : usagePrompt
+              typeof ev.promptTokens === 'number'
+                ? ev.promptTokens
+                : usagePrompt;
             usageCompletion =
               typeof ev.completionTokens === 'number'
                 ? ev.completionTokens
-                : usageCompletion
+                : usageCompletion;
             if (
               typeof ev.completionTokens === 'number' &&
               Number.isFinite(ev.completionTokens)
             ) {
-              const seconds = Math.max(0.2, (performance.now() - started) / 1000)
-              tab.tokenRate = Math.round(ev.completionTokens / seconds)
+              const seconds = Math.max(
+                0.2,
+                (performance.now() - started) / 1000,
+              );
+              tab.tokenRate = Math.round(ev.completionTokens / seconds);
             }
           }
           if (ev.type === 'done') {
-            assistant.toolCalls = (ev.toolCalls as ToolCall[]) || []
+            assistant.toolCalls = (ev.toolCalls as ToolCall[]) || [];
             if (assistant.toolCalls.length && !assistantKey) {
-              assistantKey = crypto.randomUUID()
+              assistantKey = crypto.randomUUID();
               tab.messages.push({
                 key: assistantKey,
                 role: 'assistant',
                 content: assistant.content,
                 toolCalls: assistant.toolCalls,
-              })
+              });
             }
-            if (assistantKey) flushStreamHtml(assistantKey, assistant.content)
+            if (assistantKey) flushStreamHtml(assistantKey, assistant.content);
           }
-          if (ev.type === 'error') throw new Error(String(ev.error || 'AI error'))
+          if (ev.type === 'error')
+            throw new Error(String(ev.error || 'AI error'));
         },
         signal ?? new AbortController().signal,
-      )
+      );
+      lastTokenRateAt = rateClock.lastAt;
     } catch (error) {
+      lastTokenRateAt = rateClock.lastAt;
       const aborted =
         (error instanceof DOMException && error.name === 'AbortError') ||
-        Boolean(signal?.aborted)
+        Boolean(signal?.aborted);
       if (aborted) {
-        if (assistantKey) flushStreamHtml(assistantKey, assistant.content)
-        await persistAssistant(tab, assistant)
+        if (assistantKey) flushStreamHtml(assistantKey, assistant.content);
+        await persistAssistant(tab, assistant);
         pushSessionLog(tab, {
           kind: 'system',
           name: 'abort',
           content: 'Стрим остановлен',
           status: 'error',
-        })
-        return 'aborted'
+        });
+        return 'aborted';
       }
-      throw error
+      throw error;
     }
 
-    if (signal?.aborted) return 'aborted'
+    if (signal?.aborted) return 'aborted';
 
-    const promptTokens = usagePrompt ?? heuristicPrompt
-    const completionTokens = usageCompletion ?? assistant.content.length / 4
+    const promptTokens = usagePrompt ?? heuristicPrompt;
+    const completionTokens = usageCompletion ?? assistant.content.length / 4;
     if (usagePrompt != null) {
       const rawEstimate = Math.round(
         promptEstimate / Math.max(0.01, chatTokenCalibrator.getFactor()),
-      )
-      chatTokenCalibrator.observe(rawEstimate, usagePrompt)
-      refreshContextUsage()
+      );
+      chatTokenCalibrator.observe(rawEstimate, usagePrompt);
+      refreshContextUsage();
     }
-    const rate = tab.tokenRate ?? 0
-    const usageTag =
-      usagePrompt != null || usageCompletion != null ? '' : ' ≈'
-    tab.tokenMeta = `${compact(promptTokens)} → ${compact(completionTokens)} · всего ${compact(promptTokens + completionTokens)}${usageTag} · ${rate} ток/с`
+    const rate = tab.tokenRate ?? 0;
+    const usageTag = usagePrompt != null || usageCompletion != null ? '' : ' ≈';
+    tab.tokenMeta = `${compact(promptTokens)} → ${compact(completionTokens)} · всего ${compact(promptTokens + completionTokens)}${usageTag} · ${rate} ток/с`;
 
     if (assistant.toolCalls.length) {
       if (!assistantKey) {
-        assistantKey = crypto.randomUUID()
+        assistantKey = crypto.randomUUID();
         tab.messages.push({
           key: assistantKey,
           role: 'assistant',
           content: assistant.content,
           toolCalls: assistant.toolCalls,
-        })
+        });
       } else {
-        const row = tab.messages.find((item) => item.key === assistantKey && item.role === 'assistant')
-        if (row && row.role === 'assistant') row.toolCalls = assistant.toolCalls
+        const row = tab.messages.find(
+          (item) => item.key === assistantKey && item.role === 'assistant',
+        );
+        if (row && row.role === 'assistant')
+          row.toolCalls = assistant.toolCalls;
       }
     }
     if (assistant.content || assistant.toolCalls.length) {
@@ -1405,38 +1475,45 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
         ]
           .filter(Boolean)
           .join('\n'),
-      })
+      });
     }
-    await persistAssistant(tab, assistant)
-    if (!assistant.toolCalls.length) break
+    await persistAssistant(tab, assistant);
+    if (!assistant.toolCalls.length) break;
 
-    const sig = JSON.stringify(assistant.toolCalls.map((call) => [call.name, call.arguments]))
+    const sig = JSON.stringify(
+      assistant.toolCalls.map((call) => [call.name, call.arguments]),
+    );
     if (sig === lastToolSig) {
-      repeats++
+      repeats += 1;
       if (repeats >= 2) {
-        const content = 'Остановка: повторяющиеся tool-calls.'
+        const content = 'Остановка: повторяющиеся tool-calls.';
         tab.messages.push({
           key: crypto.randomUUID(),
           role: 'assistant',
           content,
-        })
-        pushSessionLog(tab, { kind: 'system', name: 'loop', content, status: 'error' })
-        return 'loop'
+        });
+        pushSessionLog(tab, {
+          kind: 'system',
+          name: 'loop',
+          content,
+          status: 'error',
+        });
+        return 'loop';
       }
     } else {
-      repeats = 0
-      lastToolSig = sig
+      repeats = 0;
+      lastToolSig = sig;
     }
 
     for (const call of assistant.toolCalls) {
-      if (signal?.aborted) return 'aborted'
-      let args: Record<string, unknown> = {}
+      if (signal?.aborted) return 'aborted';
+      let args: Record<string, unknown> = {};
       try {
-        args = JSON.parse(call.arguments || '{}') as Record<string, unknown>
+        args = JSON.parse(call.arguments || '{}') as Record<string, unknown>;
       } catch {
-        args = {}
+        args = {};
       }
-      const toolKey = crypto.randomUUID()
+      const toolKey = crypto.randomUUID();
       tab.messages.push({
         key: toolKey,
         role: 'tool',
@@ -1445,237 +1522,264 @@ async function agentLoop(tabId: string): Promise<LoopStopReason> {
         full: '',
         status: 'pending',
         toolCallId: call.id,
-      })
-      const apiRef = props.univerApi ?? null
+      });
+      const apiRef = props.univerApi ?? null;
       if (
         !tab.allowedTools.has(call.name) &&
         !isToolAutoAllowed(call.name) &&
         needsApprove(call.name, args, apiRef)
       ) {
-        const ok = await askApprove(tab, call.name, args)
-        if (signal?.aborted) return 'aborted'
+        const ok = await askApprove(tab, call.name, args);
+        if (signal?.aborted) return 'aborted';
         if (!ok) {
-          const rejected = 'Отклонено пользователем'
-          setToolRow(tab, toolKey, rejected, rejected, 'error')
+          const rejected = 'Отклонено пользователем';
+          setToolRow(tab, toolKey, rejected, rejected, 'error');
           pushSessionLog(tab, {
             kind: 'tool',
             name: call.name,
             content: JSON.stringify({ error: 'rejected by user', args }),
             status: 'error',
-          })
+          });
           await api.addChatMessage(tab.id, {
             role: 'tool',
             content: JSON.stringify({ error: 'rejected by user' }),
             toolName: call.name,
             toolCallId: call.id,
             toolStatus: 'error',
-          })
-          return 'rejected'
+          });
+          return 'rejected';
         }
       }
-      if (signal?.aborted) return 'aborted'
+      if (signal?.aborted) return 'aborted';
       // Keep runtime plan hydrated for update_plan (reload / «Сделать по плану» from markdown).
       if (
         (call.name === 'update_plan' || call.name === 'create_plan') &&
         !tab.plan &&
         tab.planMarkdown
       ) {
-        tab.plan = parsePlanMarkdown(tab.planMarkdown)
+        tab.plan = parsePlanMarkdown(tab.planMarkdown);
       }
-      let result: string
+      let result: string;
       try {
         result = await runOfficeTool(call.name, args, {
           api: apiRef,
           docType: props.docType === 'DOC' ? 'DOC' : 'SHEET',
           plan: tab.plan,
           setPlan: (plan) => {
-            tab.plan = plan
+            tab.plan = plan;
           },
-        })
+        });
       } catch (error) {
         result = JSON.stringify({
           error: error instanceof Error ? error.message : 'tool failed',
           hint: 'Исправьте аргументы tool и повторите вызов; не повторяйте тот же ошибочный payload.',
-        })
+        });
       }
-      if ((call.name === 'create_plan' || call.name === 'update_plan') && tab.plan) {
+      if (
+        (call.name === 'create_plan' || call.name === 'update_plan') &&
+        tab.plan
+      ) {
         if (call.name === 'create_plan') {
-          tab.planEdited = false
-          tab.planRunState = 'idle'
-          tab.planTitle = tab.plan.name
-          tab.planMarkdown = planToMarkdown(tab.plan)
+          tab.planEdited = false;
+          tab.planRunState = 'idle';
+          tab.planTitle = tab.plan.name;
+          tab.planMarkdown = planToMarkdown(tab.plan);
           void patchTab(tab, {
             planTitle: tab.planTitle,
             planMarkdown: tab.planMarkdown,
             planExecuted: false,
-          })
+          });
         } else if (tab.executingPlan || !tab.planEdited) {
-          tab.planTitle = tab.plan.name
-          tab.planMarkdown = planToMarkdown(tab.plan)
-          if (planAllTodosDone(tab.plan)) tab.planRunState = 'done'
-          void patchTab(tab, { planTitle: tab.planTitle, planMarkdown: tab.planMarkdown })
+          tab.planTitle = tab.plan.name;
+          tab.planMarkdown = planToMarkdown(tab.plan);
+          if (planAllTodosDone(tab.plan)) tab.planRunState = 'done';
+          void patchTab(tab, {
+            planTitle: tab.planTitle,
+            planMarkdown: tab.planMarkdown,
+          });
         }
       }
-      const status = toolResultStatus(result)
-      setToolRow(tab, toolKey, result.slice(0, 500), result, status)
+      const status = toolResultStatus(result);
+      setToolRow(tab, toolKey, result.slice(0, 500), result, status);
       if (status !== 'error' && isDocumentWriteTool(call.name)) {
-        tab.wroteSinceCheckpoint = true
-        emit('documentChanged')
+        tab.wroteSinceCheckpoint = true;
+        emit('documentChanged');
       }
       pushSessionLog(tab, {
         kind: 'tool',
         name: call.name,
         content: `args: ${JSON.stringify(args)}\nresult: ${result}`,
         status,
-      })
+      });
       await api.addChatMessage(tab.id, {
         role: 'tool',
         content: result,
         toolName: call.name,
         toolCallId: call.id,
         toolStatus: status,
-      })
+      });
       if (status === 'error') {
-        consecutiveToolErrors += 1
+        consecutiveToolErrors += 1;
         // During plan execution allow more recoveries — model often fixes empty formulas etc.
-        const errorBudget = tab.executingPlan ? 5 : 3
+        const errorBudget = tab.executingPlan ? 5 : 3;
         if (consecutiveToolErrors >= errorBudget) {
           const content =
-            'Остановка: несколько tool-вызовов подряд завершились ошибкой. Уточните задачу или проверьте выделение. Подробности — в логе сессии.'
+            'Остановка: несколько tool-вызовов подряд завершились ошибкой. Уточните задачу или проверьте выделение. Подробности — в логе сессии.';
           tab.messages.push({
             key: crypto.randomUUID(),
             role: 'assistant',
             content,
-          })
+          });
           pushSessionLog(tab, {
             kind: 'system',
             name: 'tool-errors',
             content,
             status: 'error',
-          })
-          return 'tools'
+          });
+          return 'tools';
         }
       } else {
-        consecutiveToolErrors = 0
+        consecutiveToolErrors = 0;
       }
     }
   }
-  return null
+  return null;
 }
+/* eslint-enable no-await-in-loop, no-restricted-syntax */
 
-function setToolRow(tab: Tab, key: string, content: string, full: string, status: 'ok' | 'error') {
-  const row = tab.messages.find((item) => item.key === key && item.role === 'tool')
+function setToolRow(
+  tab: Tab,
+  key: string,
+  content: string,
+  full: string,
+  status: 'ok' | 'error',
+) {
+  const row = tab.messages.find(
+    (item) => item.key === key && item.role === 'tool',
+  );
   if (row && row.role === 'tool') {
-    row.content = content
-    row.full = full
-    row.status = status
+    row.content = content;
+    row.full = full;
+    row.status = status;
   }
 }
 
-async function persistAssistant(tab: Tab, assistant: { content: string; toolCalls: ToolCall[] }) {
-  if (!assistant.content && !assistant.toolCalls.length) return
+async function persistAssistant(
+  tab: Tab,
+  assistant: { content: string; toolCalls: ToolCall[] },
+) {
+  if (!assistant.content && !assistant.toolCalls.length) return;
   await api.addChatMessage(tab.id, {
     role: 'assistant',
     content: assistant.content,
-    toolCallsJson: assistant.toolCalls.length ? JSON.stringify(assistant.toolCalls) : undefined,
-  })
+    toolCallsJson: assistant.toolCalls.length
+      ? JSON.stringify(assistant.toolCalls)
+      : undefined,
+  });
 }
 
-const TOOL_WIRE_MAX = 4000
-const ARGS_WIRE_MAX = 2000
-const MSG_WIRE_MAX = 32_000
-const WIRE_MAX_MESSAGES = 60
-const WIRE_MAX_TOTAL_CHARS = 140_000
+const TOOL_WIRE_MAX = 4000;
+const ARGS_WIRE_MAX = 2000;
+const MSG_WIRE_MAX = 32_000;
+const WIRE_MAX_MESSAGES = 60;
+const WIRE_MAX_TOTAL_CHARS = 140_000;
 
 function clipWireText(text: string, max: number): string {
-  if (text.length <= max) return text
+  if (text.length <= max) return text;
   return JSON.stringify({
     truncated: true,
     preview: text.slice(0, max),
     originalChars: text.length,
-  })
+  });
 }
 
 function wireContentChars(msg: Record<string, unknown>): number {
-  let n = 0
-  if (typeof msg.content === 'string') n += msg.content.length
-  const toolCalls = msg.tool_calls
+  let n = 0;
+  if (typeof msg.content === 'string') n += msg.content.length;
+  const toolCalls = msg.tool_calls;
   if (Array.isArray(toolCalls)) {
-    for (const tc of toolCalls) {
-      const args = (tc as { function?: { arguments?: string } })?.function?.arguments
-      if (typeof args === 'string') n += args.length
-    }
+    toolCalls.forEach((tc) => {
+      const args = (tc as { function?: { arguments?: string } })?.function
+        ?.arguments;
+      if (typeof args === 'string') n += args.length;
+    });
   }
-  return n
+  return n;
 }
 
 function trimWireForProvider(wire: Array<Record<string, unknown>>) {
-  const totalChars = () => wire.reduce((sum, m) => sum + wireContentChars(m), 0)
-  if (wire.length <= WIRE_MAX_MESSAGES && totalChars() <= WIRE_MAX_TOTAL_CHARS) {
-    return wire
+  const totalChars = () =>
+    wire.reduce((sum, m) => sum + wireContentChars(m), 0);
+  if (
+    wire.length <= WIRE_MAX_MESSAGES &&
+    totalChars() <= WIRE_MAX_TOTAL_CHARS
+  ) {
+    return wire;
   }
 
-  const turns: Array<Array<Record<string, unknown>>> = []
-  let current: Array<Record<string, unknown>> = []
-  for (const msg of wire) {
+  const turns: Array<Array<Record<string, unknown>>> = [];
+  let current: Array<Record<string, unknown>> = [];
+  wire.forEach((msg) => {
     if (msg.role === 'user' && current.length) {
-      turns.push(current)
-      current = []
+      turns.push(current);
+      current = [];
     }
-    current.push(msg)
-  }
-  if (current.length) turns.push(current)
+    current.push(msg);
+  });
+  if (current.length) turns.push(current);
 
-  let dropped = 0
+  let dropped = 0;
   while (
     turns.length > 1 &&
     (turns.reduce((n, t) => n + t.length, 0) > WIRE_MAX_MESSAGES ||
-      turns.reduce((n, t) => n + t.reduce((s, m) => s + wireContentChars(m), 0), 0) >
-        WIRE_MAX_TOTAL_CHARS)
+      turns.reduce(
+        (n, t) => n + t.reduce((s, m) => s + wireContentChars(m), 0),
+        0,
+      ) > WIRE_MAX_TOTAL_CHARS)
   ) {
-    dropped += turns.shift()!.length
+    dropped += turns.shift()!.length;
   }
 
-  const kept = turns.flat()
-  if (!dropped) return kept
+  const kept = turns.flat();
+  if (!dropped) return kept;
   return [
     {
       role: 'user',
       content: `[Пропущены ранние сообщения: ${dropped}]`,
     },
     ...kept,
-  ]
+  ];
 }
 
 function closeOpenToolCalls(
   wire: Array<Record<string, unknown>>,
   openToolCallIds: Set<string> | null,
 ) {
-  if (!openToolCallIds?.size) return
-  for (const id of openToolCallIds) {
+  if (!openToolCallIds?.size) return;
+  openToolCallIds.forEach((id) => {
     wire.push({
       role: 'tool',
       tool_call_id: id,
       content: JSON.stringify({ error: 'tool result missing' }),
-    })
-  }
-  openToolCallIds.clear()
+    });
+  });
+  openToolCallIds.clear();
 }
 
 function toWire(tab: Tab) {
-  const wire: Array<Record<string, unknown>> = []
-  let openToolCallIds: Set<string> | null = null
-  for (const message of tab.messages) {
+  const wire: Array<Record<string, unknown>> = [];
+  let openToolCallIds: Set<string> | null = null;
+  tab.messages.forEach((message) => {
     if (message.role === 'user') {
-      closeOpenToolCalls(wire, openToolCallIds)
-      openToolCallIds = null
+      closeOpenToolCalls(wire, openToolCallIds);
+      openToolCallIds = null;
       wire.push({
         role: 'user',
         content: clipWireText(message.wire, MSG_WIRE_MAX),
-      })
+      });
     }
     if (message.role === 'assistant') {
-      closeOpenToolCalls(wire, openToolCallIds)
+      closeOpenToolCalls(wire, openToolCallIds);
       const toolCalls = message.toolCalls?.length
         ? message.toolCalls.map((call) => ({
             id: call.id,
@@ -1685,44 +1789,46 @@ function toWire(tab: Tab) {
               arguments: clipWireText(call.arguments, ARGS_WIRE_MAX),
             },
           }))
-        : undefined
+        : undefined;
       openToolCallIds = toolCalls
         ? new Set(toolCalls.map((call) => call.id))
-        : null
+        : null;
       const content = message.content
         ? clipWireText(message.content, MSG_WIRE_MAX)
-        : null
+        : null;
       wire.push({
         role: 'assistant',
         content,
         ...(toolCalls ? { tool_calls: toolCalls } : {}),
-      })
+      });
     }
     if (message.role === 'tool' && message.status !== 'pending') {
-      if (!message.toolCallId || !openToolCallIds?.has(message.toolCallId)) continue
-      openToolCallIds.delete(message.toolCallId)
-      wire.push({
-        role: 'tool',
-        tool_call_id: message.toolCallId,
-        name: message.name,
-        content: clipWireText(message.full || message.content, TOOL_WIRE_MAX),
-      })
+      if (message.toolCallId && openToolCallIds?.has(message.toolCallId)) {
+        openToolCallIds.delete(message.toolCallId);
+        wire.push({
+          role: 'tool',
+          tool_call_id: message.toolCallId,
+          name: message.name,
+          content: clipWireText(message.full || message.content, TOOL_WIRE_MAX),
+        });
+      }
     }
-  }
-  closeOpenToolCalls(wire, openToolCallIds)
-  return wire
+  });
+  closeOpenToolCalls(wire, openToolCallIds);
+  return wire;
 }
 
 function parseSsePart(part: string): Record<string, unknown> | null {
-  const line = part.trim()
-  if (!line.startsWith('data:')) return null
+  const line = part.trim();
+  if (!line.startsWith('data:')) return null;
   try {
-    return JSON.parse(line.slice(5).trim()) as Record<string, unknown>
+    return JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
   } catch {
-    return null
+    return null;
   }
 }
 
+/* eslint-disable no-await-in-loop, no-restricted-syntax -- ordered SSE stream processing */
 async function streamChat(
   body: Record<string, unknown>,
   onEvent: (ev: Record<string, unknown>) => void,
@@ -1734,82 +1840,89 @@ async function streamChat(
     signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
-  if (!res.ok || !res.body) throw new Error('Не удалось связаться с AI gateway')
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+  });
+  if (!res.ok || !res.body)
+    throw new Error('Не удалось связаться с AI gateway');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
   try {
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
       for (const part of parts) {
-        const event = parseSsePart(part)
-        if (event) onEvent(event)
+        const event = parseSsePart(part);
+        if (event) onEvent(event);
       }
     }
-    buffer += decoder.decode()
+    buffer += decoder.decode();
     if (buffer.trim()) {
-      const event = parseSsePart(buffer)
-      if (event) onEvent(event)
+      const event = parseSsePart(buffer);
+      if (event) onEvent(event);
     }
   } finally {
     try {
-      await reader.cancel()
+      await reader.cancel();
     } catch {
       /* ignore */
     }
   }
 }
+/* eslint-enable no-await-in-loop, no-restricted-syntax */
 
 function startResize(event: PointerEvent) {
-  if (props.collapsed) return
-  event.preventDefault()
-  const startX = event.clientX
-  const startW = width.value
+  if (props.collapsed) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startW = width.value;
   const move = (ev: PointerEvent) => {
-    const max = Math.max(320, Math.floor(window.innerWidth * 0.5))
-    width.value = Math.min(max, Math.max(320, startW + (startX - ev.clientX)))
-  }
+    const max = Math.max(320, Math.floor(window.innerWidth * 0.5));
+    width.value = Math.min(max, Math.max(320, startW + (startX - ev.clientX)));
+  };
   const up = () => {
-    localStorage.setItem(WIDTH_KEY, String(Math.round(width.value)))
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', up)
-  }
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', up)
+    localStorage.setItem(WIDTH_KEY, String(Math.round(width.value)));
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 
 function resizeComposer() {
-  const el = composerEl.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight}px`
+  const el = composerEl.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
 }
 
 function onComposerKey(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.isComposing) return
-  if (event.shiftKey) return
-  event.preventDefault()
-  void send()
+  if (event.key !== 'Enter' || event.isComposing) return;
+  if (event.shiftKey) return;
+  event.preventDefault();
+  void send();
 }
 
 watch(
   () => [activeId.value, active.value?.draft] as const,
   async () => {
-    await nextTick()
-    resizeComposer()
+    await nextTick();
+    resizeComposer();
   },
-)
+);
 </script>
 
 <template>
   <aside class="panel" :class="{ collapsed }" :style="panelStyle">
     <div v-if="!collapsed" class="resize" @pointerdown="startResize" />
-    <button v-if="collapsed" type="button" class="expand" @click="emit('toggle')">
+    <button
+      v-if="collapsed"
+      type="button"
+      class="expand"
+      @click="emit('toggle')"
+    >
       <span class="expand-label">AI</span>
     </button>
     <template v-else>
@@ -1825,9 +1938,9 @@ watch(
             <span v-if="tab.streaming" class="spin" />
             <input
               v-if="renamingId === tab.id"
+              v-model="renameDraft"
               class="tab-rename"
               :data-id="tab.id"
-              v-model="renameDraft"
               @click.stop
               @keydown="onRenameKey($event, tab)"
               @blur="commitRename(tab)"
@@ -1837,12 +1950,22 @@ watch(
               class="tab-title"
               :title="tab.title"
               @dblclick.stop="startRename(tab)"
-            >{{ tab.title }}</span>
-            <button type="button" class="x" title="Закрыть" @click.stop="closeTab(tab.id)">×</button>
+              >{{ tab.title }}</span
+            >
+            <button
+              type="button"
+              class="x"
+              title="Закрыть"
+              @click.stop="closeTab(tab.id)"
+            >
+              ×
+            </button>
           </div>
         </div>
         <div class="tab-actions">
-          <button type="button" class="plus" title="Новый чат" @click="addTab">+</button>
+          <button type="button" class="plus" title="Новый чат" @click="addTab">
+            +
+          </button>
           <button
             ref="historyBtn"
             type="button"
@@ -1874,17 +1997,62 @@ watch(
             "
             @click="copySessionLog"
           >
-            <svg v-if="!logCopied" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
-              <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <svg
+              v-if="!logCopied"
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              aria-hidden="true"
+            >
+              <rect
+                x="9"
+                y="9"
+                width="11"
+                height="11"
+                rx="2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+              />
+              <path
+                d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+              />
             </svg>
-            <svg v-else viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 12.5l4.5 4.5L19 7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
-          <button type="button" class="icon" title="Свернуть" @click="emit('toggle')">
+          <button
+            type="button"
+            class="icon"
+            title="Свернуть"
+            @click="emit('toggle')"
+          >
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M9 6l6 6-6 6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
         </div>
@@ -1893,18 +2061,38 @@ watch(
       <div v-if="historyOpen" ref="historyPanel" class="history-panel">
         <div class="history-head">
           <span>Закрытые чаты</span>
-          <button type="button" class="text" @click="historyOpen = false">Закрыть</button>
+          <button type="button" class="text" @click="historyOpen = false">
+            Закрыть
+          </button>
         </div>
         <p v-if="historyLoading" class="history-hint">Загрузка…</p>
-        <p v-else-if="historyError" class="history-hint error">{{ historyError }}</p>
+        <p v-else-if="historyError" class="history-hint error">
+          {{ historyError }}
+        </p>
         <p v-else-if="!historyItems.length" class="history-hint">Пока пусто</p>
         <ul v-else class="history-list">
           <li v-for="item in historyItems" :key="item.id">
-            <button type="button" class="history-main" @click="reopenChat(item.id)">
-              <span class="history-title">{{ item.title || 'Без названия' }}</span>
-              <span class="history-meta">{{ formatHistoryDate(item.updatedAt) }} · {{ modeLabel(asMode(item.mode)) }}</span>
+            <button
+              type="button"
+              class="history-main"
+              @click="reopenChat(item.id)"
+            >
+              <span class="history-title">{{
+                item.title || 'Без названия'
+              }}</span>
+              <span class="history-meta"
+                >{{ formatHistoryDate(item.updatedAt) }} ·
+                {{ modeLabel(asMode(item.mode)) }}</span
+              >
             </button>
-            <button type="button" class="history-del" title="Удалить" @click="deleteFromHistory(item.id)">×</button>
+            <button
+              type="button"
+              class="history-del"
+              title="Удалить"
+              @click="deleteFromHistory(item.id)"
+            >
+              ×
+            </button>
           </li>
         </ul>
       </div>
@@ -1915,15 +2103,27 @@ watch(
 
       <div v-if="!hasProvider" class="cta">
         <p class="cta-title">Подключите AI-провайдер</p>
-        <p class="cta-text">Добавьте ключ в настройках, чтобы ассистент мог работать с документом.</p>
-        <button type="button" class="ui-btn ui-btn--primary" @click="goSettings">Открыть настройки</button>
+        <p class="cta-text">
+          Добавьте ключ в настройках, чтобы ассистент мог работать с документом.
+        </p>
+        <button
+          type="button"
+          class="ui-btn ui-btn--primary"
+          @click="goSettings"
+        >
+          Открыть настройки
+        </button>
       </div>
-      <div v-else-if="!active" class="cta"><p>Открываю чат…</p></div>
+      <div v-else-if="!active" class="cta">
+        <p>Открываю чат…</p>
+      </div>
       <div v-else class="stack" :class="{ empty: !hasMessages }">
         <div v-if="!hasMessages" class="empty-state">
           <h3>{{ modeLabel(active.mode) }}</h3>
           <p>Напишите задачу или выберите подсказку.</p>
-          <p class="attach-help">{{ attachHelpText }}</p>
+          <p class="attach-help">
+            {{ attachHelpText }}
+          </p>
           <div class="hints">
             <button
               v-for="hint in emptyHints"
@@ -1944,8 +2144,16 @@ watch(
           class="transcript"
           @click="onTranscriptClick"
         >
-          <div v-for="message in active.messages" :key="message.key" class="msg" :class="message.role">
-            <div v-if="message.role === 'assistant' && message.content" class="assistant-wrap">
+          <div
+            v-for="message in active.messages"
+            :key="message.key"
+            class="msg"
+            :class="message.role"
+          >
+            <div
+              v-if="message.role === 'assistant' && message.content"
+              class="assistant-wrap"
+            >
               <div class="bubble md" v-html="assistantHtml(message)" />
               <button
                 type="button"
@@ -1955,7 +2163,9 @@ watch(
                 {{ copiedKey === message.key ? 'Скопировано' : 'Копировать' }}
               </button>
             </div>
-            <div v-else-if="message.role === 'user'" class="bubble user-bubble">{{ message.content }}</div>
+            <div v-else-if="message.role === 'user'" class="bubble user-bubble">
+              {{ message.content }}
+            </div>
             <button
               v-else-if="message.role === 'tool'"
               type="button"
@@ -1966,7 +2176,9 @@ watch(
               <span class="tool-head">
                 <strong>{{ message.name }}</strong>
                 <span class="tool-status">{{ message.status }}</span>
-                <span class="tool-caret">{{ isToolOpen(message) ? '▾' : '▸' }}</span>
+                <span class="tool-caret">{{
+                  isToolOpen(message) ? '▾' : '▸'
+                }}</span>
               </span>
               <pre v-if="isToolOpen(message)">{{ message.content }}</pre>
             </button>
@@ -1988,27 +2200,52 @@ watch(
             Контрольная точка
           </button>
           <div v-if="active.canRetry && !active.streaming" class="retry-row">
-            <button type="button" class="retry" @click="retryTurn">Повторить</button>
-            <span v-if="active.retryReason" class="retry-reason">{{ active.retryReason }}</span>
+            <button type="button" class="retry" @click="retryTurn">
+              Повторить
+            </button>
+            <span v-if="active.retryReason" class="retry-reason">{{
+              active.retryReason
+            }}</span>
           </div>
 
           <div v-if="active.pendingApprove" class="approve">
             <p>
               Подтвердить правку
-              <strong>{{ active.pendingApprove.name }}</strong>?
+              <strong>{{ active.pendingApprove.name }}</strong
+              >?
             </p>
-            <p class="approve-summary">{{ approveSummary }}</p>
+            <p class="approve-summary">
+              {{ approveSummary }}
+            </p>
             <p class="approve-hint">Откат turn — кнопка «Контрольная точка»</p>
-            <button type="button" class="text" @click="approveExpanded = !approveExpanded">
+            <button
+              type="button"
+              class="text"
+              @click="approveExpanded = !approveExpanded"
+            >
               {{ approveExpanded ? 'Скрыть детали' : 'Показать детали' }}
             </button>
-            <pre v-if="approveExpanded">{{ JSON.stringify(active.pendingApprove.args, null, 2) }}</pre>
+            <pre v-if="approveExpanded">{{
+              JSON.stringify(active.pendingApprove.args, null, 2)
+            }}</pre>
             <div class="row">
-              <button type="button" @click="resolveApprove(false)">Отклонить</button>
-              <button type="button" class="text" @click="resolveApprove(true, true)">
+              <button type="button" @click="resolveApprove(false)">
+                Отклонить
+              </button>
+              <button
+                type="button"
+                class="text"
+                @click="resolveApprove(true, true)"
+              >
                 Всегда в этой сессии
               </button>
-              <button type="button" class="primary" @click="resolveApprove(true)">Принять</button>
+              <button
+                type="button"
+                class="primary"
+                @click="resolveApprove(true)"
+              >
+                Принять
+              </button>
             </div>
           </div>
         </div>
@@ -2020,15 +2257,22 @@ watch(
         >
           <div class="kicker">
             <span>План</span>
-            <span v-if="active.planRunState === 'done'" class="plan-badge">Выполнено</span>
-            <span v-else-if="active.planRunState === 'running'" class="plan-badge running">
+            <span v-if="active.planRunState === 'done'" class="plan-badge"
+              >Выполнено</span
+            >
+            <span
+              v-else-if="active.planRunState === 'running'"
+              class="plan-badge running"
+            >
               Выполняется…
             </span>
           </div>
           <h4>{{ active.planTitle || 'План' }}</h4>
           <p>{{ planOverview }}</p>
           <div class="plan-actions">
-            <button type="button" class="text" @click="openPlan">Открыть</button>
+            <button type="button" class="text" @click="openPlan">
+              Открыть
+            </button>
             <button
               v-if="active.planRunState === 'done'"
               type="button"
@@ -2045,13 +2289,19 @@ watch(
               :disabled="active.streaming || active.planRunState === 'running'"
               @click="runPlan"
             >
-              {{ active.planRunState === 'running' ? 'Выполняется…' : 'Сделать по плану' }}
+              {{
+                active.planRunState === 'running'
+                  ? 'Выполняется…'
+                  : 'Сделать по плану'
+              }}
             </button>
           </div>
         </section>
 
         <div class="composer drop-up">
-          <p v-if="attachError" class="attach-error">{{ attachError }}</p>
+          <p v-if="attachError" class="attach-error">
+            {{ attachError }}
+          </p>
           <div v-if="active.attachments.length" class="context-chips">
             <button
               v-for="(file, index) in active.attachments"
@@ -2081,22 +2331,53 @@ watch(
                   class="pill"
                   :class="active.mode"
                   :aria-expanded="modeMenu"
-                  @click="modeMenu = !modeMenu; modelMenu = false; historyOpen = false"
+                  @click="
+                    modeMenu = !modeMenu;
+                    modelMenu = false;
+                    historyOpen = false;
+                  "
                 >
-                  <span v-if="active.mode === 'agent'" class="glyph" aria-hidden="true">
+                  <span
+                    v-if="active.mode === 'agent'"
+                    class="glyph"
+                    aria-hidden="true"
+                  >
                     <svg viewBox="0 0 24 24" width="12" height="12">
                       <circle cx="12" cy="12" r="3.5" fill="currentColor" />
-                      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" />
+                      <path
+                        d="M12 3v3M12 18v3M3 12h3M18 12h3"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        fill="none"
+                      />
                     </svg>
                   </span>
-                  <span v-else-if="active.mode === 'plan'" class="glyph" aria-hidden="true">
+                  <span
+                    v-else-if="active.mode === 'plan'"
+                    class="glyph"
+                    aria-hidden="true"
+                  >
                     <svg viewBox="0 0 24 24" width="12" height="12">
-                      <path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                      <path
+                        d="M5 7h14M5 12h14M5 17h10"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                      />
                     </svg>
                   </span>
                   <span v-else class="glyph" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="12" height="12">
-                      <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" />
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="7"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                      />
                     </svg>
                   </span>
                   <span class="pill-label">{{ modeLabel(active.mode) }}</span>
@@ -2121,15 +2402,23 @@ watch(
                 </button>
                 <div v-if="modelMenu" class="menu model-menu">
                   <p v-if="modelMenuLoading" class="menu-hint">Загрузка…</p>
-                  <p v-else-if="modelMenuError" class="menu-hint">{{ modelMenuError }}</p>
+                  <p v-else-if="modelMenuError" class="menu-hint">
+                    {{ modelMenuError }}
+                  </p>
                   <button
                     v-for="option in modelOptions"
                     :key="`${option.providerId}:${option.model}`"
                     type="button"
-                    :class="{ active: active.providerId === option.providerId && active.model === option.model }"
+                    :class="{
+                      active:
+                        active.providerId === option.providerId &&
+                        active.model === option.model,
+                    }"
                     @click="setModel(option)"
                   >
-                    <span v-if="providers.length > 1" class="menu-provider">{{ option.provider }} · </span>
+                    <span v-if="providers.length > 1" class="menu-provider"
+                      >{{ option.provider }} ·
+                    </span>
                     {{ option.model }}
                   </button>
                 </div>
@@ -2145,7 +2434,12 @@ watch(
                   aria-describedby="attach-help-popover"
                   @click="pickAttach"
                 >
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
                     <path
                       fill="none"
                       stroke="currentColor"
@@ -2154,7 +2448,11 @@ watch(
                     />
                   </svg>
                 </button>
-                <div id="attach-help-popover" class="attach-popover" role="tooltip">
+                <div
+                  id="attach-help-popover"
+                  class="attach-popover"
+                  role="tooltip"
+                >
                   {{ attachHelpText }}
                 </div>
                 <input
@@ -2187,7 +2485,9 @@ watch(
         <textarea v-model="planDraft" class="plan-edit" />
         <footer>
           <button type="button" @click="planOpen = false">Закрыть</button>
-          <button type="button" class="primary" @click="savePlan">Сохранить</button>
+          <button type="button" class="primary" @click="savePlan">
+            Сохранить
+          </button>
         </footer>
       </div>
     </div>
@@ -2353,7 +2653,9 @@ watch(
   flex-shrink: 0;
 }
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .history-panel {
   border-bottom: 1px solid var(--border);
@@ -2531,11 +2833,21 @@ watch(
 .stack.empty .transcript {
   display: none;
 }
-.stack .plan-card { order: 2; }
-.stack .composer { order: 3; }
-.stack.empty .empty-state { order: 1; }
-.stack.empty .plan-card { order: 2; }
-.stack.empty .composer { order: 3; }
+.stack .plan-card {
+  order: 2;
+}
+.stack .composer {
+  order: 3;
+}
+.stack.empty .empty-state {
+  order: 1;
+}
+.stack.empty .plan-card {
+  order: 2;
+}
+.stack.empty .composer {
+  order: 3;
+}
 .msg.user {
   display: flex;
   justify-content: flex-end;
@@ -2601,9 +2913,15 @@ watch(
   font-size: 0.68rem;
   letter-spacing: 0.03em;
 }
-.tool.ok .tool-status { color: var(--success); }
-.tool.error .tool-status { color: var(--danger); }
-.tool.pending .tool-status { color: var(--accent); }
+.tool.ok .tool-status {
+  color: var(--success);
+}
+.tool.error .tool-status {
+  color: var(--danger);
+}
+.tool.pending .tool-status {
+  color: var(--accent);
+}
 .tool-caret {
   margin-left: auto;
   color: var(--fg-3);
@@ -2632,10 +2950,18 @@ watch(
   animation: dots 1.2s steps(4, end) infinite;
 }
 @keyframes dots {
-  0% { content: ''; }
-  25% { content: '.'; }
-  50% { content: '..'; }
-  75% { content: '...'; }
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
 }
 .checkpoint {
   align-self: stretch;
@@ -2948,8 +3274,13 @@ button.go:disabled {
   border-radius: 8px;
   cursor: pointer;
 }
-.menu button:hover { background: var(--bg-hover); }
-.menu button.active { background: var(--bg-hover); color: var(--accent); }
+.menu button:hover {
+  background: var(--bg-hover);
+}
+.menu button.active {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
 .menu-hint {
   margin: 0;
   padding: 8px 10px;
@@ -2994,7 +3325,9 @@ button.go:disabled {
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.12s ease, visibility 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    visibility 0.12s ease;
 }
 .attach-wrap:hover .attach-popover,
 .attach-wrap:focus-within .attach-popover {
@@ -3084,7 +3417,9 @@ button.go:disabled {
   padding: 12px;
   gap: 8px;
 }
-.modal header { font-weight: 650; }
+.modal header {
+  font-weight: 650;
+}
 .plan-edit {
   flex: 1;
   resize: none;
@@ -3100,13 +3435,17 @@ button.go:disabled {
   justify-content: flex-end;
   gap: 8px;
 }
-:deep(.md p) { margin: 0.35em 0; }
+:deep(.md p) {
+  margin: 0.35em 0;
+}
 :deep(.md ul),
 :deep(.md ol) {
   margin: 0.4em 0;
   padding-left: 1.2em;
 }
-:deep(.md li) { margin: 0.15em 0; }
+:deep(.md li) {
+  margin: 0.15em 0;
+}
 :deep(.md table) {
   border-collapse: collapse;
   width: 100%;

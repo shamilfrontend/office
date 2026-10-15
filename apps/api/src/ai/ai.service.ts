@@ -28,24 +28,26 @@ export class AiService {
   }
 
   list(userId: string) {
-    return this.prisma.aiProviderConfig.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        provider: true,
-        baseUrl: true,
-        model: true,
-        enabled: true,
-        createdAt: true,
-        updatedAt: true,
-        encryptedApiKey: true,
-      },
-    }).then((rows) =>
-      rows.map(({ encryptedApiKey, ...rest }) => ({
-        ...rest,
-        hasApiKey: Boolean(encryptedApiKey),
-      })),
-    );
+    return this.prisma.aiProviderConfig
+      .findMany({
+        where: { userId },
+        select: {
+          id: true,
+          provider: true,
+          baseUrl: true,
+          model: true,
+          enabled: true,
+          createdAt: true,
+          updatedAt: true,
+          encryptedApiKey: true,
+        },
+      })
+      .then((rows) =>
+        rows.map(({ encryptedApiKey, ...rest }) => ({
+          ...rest,
+          hasApiKey: Boolean(encryptedApiKey),
+        })),
+      );
   }
 
   async upsert(
@@ -69,11 +71,14 @@ export class AiService {
       });
       if (!existing) throw new NotFoundException();
       const willClearKey = body.apiKey !== undefined && !body.apiKey;
-      const willHaveKey = body.apiKey
-        ? true
-        : willClearKey
-          ? false
-          : Boolean(existing.encryptedApiKey);
+      let willHaveKey: boolean;
+      if (body.apiKey) {
+        willHaveKey = true;
+      } else if (willClearKey) {
+        willHaveKey = false;
+      } else {
+        willHaveKey = Boolean(existing.encryptedApiKey);
+      }
       if (defaults.needsKey && !willHaveKey) {
         throw new BadRequestException(
           'API-ключ обязателен для этого провайдера.',
@@ -303,6 +308,8 @@ export class AiService {
         model: body.model,
         documentId: body.documentId,
         pinnedOpen: true,
+        // Prisma aggregate field name is `_max`.
+        // eslint-disable-next-line no-underscore-dangle -- Prisma aggregate shape
         sortOrder: (max._max.sortOrder ?? 0) + 1,
       },
       select: this.chatSelect,
@@ -466,18 +473,22 @@ export class AiService {
       });
       return;
     }
-    const systemExtra =
-      body.mode === 'plan'
-        ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим План: только читай документ через tools и создавай план (create_plan/update_plan). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection или контекст выделения. Для таблиц сначала read_range/read_formulas/get_selection; другой лист — activate_sheet. В плане указывай конкретные диапазоны/ячейки. Диаграммы (charts) tools не поддерживают — отмечай как ручной шаг.'
-        : body.mode === 'agent'
-          ? 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Агент: можешь читать и изменять документ через tools. Если пользователь говорит «здесь/это/выделенное», опирайся на selection / get_selection. Для таблиц: другие листы — сначала activate_sheet; insert_sheet/rename_sheet/delete_sheet/set_freeze для структуры; set_cells — литералы; set_formulas — формулы (EN-имена, аргументы через запятую, ведущий =, напр. =SUM(A1:A10); пустые ячейки в матрице можно оставлять — они пропускаются); copy_formulas — размножить формулы вниз с автосдвигом ссылок (предпочтительнее для 10+ одинаковых строк); read_formulas читает формулы и значения; insert_image — картинка по https URL; диаграммы (charts) недоступны как tool — скажи пользователю вставить вручную; для оформления — format_range, set_column_widths (ширина в пикселях, типично 80–220), set_number_format, set_borders, set_row_heights; add_conditional_highlight/get_conditional_formatting/clear_conditional_formatting — условное форматирование (empty/not_empty/number_between/text_contains/duplicate); set_list_validation/set_number_validation/get_data_validations/clear_data_validation — валидация (список или число between/gt/lt); для объединения — merge_range; sort_range — сортировка; create_filter/set_column_filter/remove_filter/get_filter — автофильтр; search_in_sheet / replace_in_sheet — поиск и замена литералов. Сначала read_range/read_formulas/get_selection. При выполнении плана вызывай update_plan по мере прогресса (status: completed). Для документов: get_doc_outline/search_in_document; структура — insert_paragraph, set_heading, set_list; format_text по выделению или paragraphIndex. После серии tools дай краткий итог.'
-          : 'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Чат: читай открытый документ через tools (сначала get_workbook_outline/get_doc_outline или get_selection, затем read_range / read_formulas / read_document / search_in_document; для другого листа — activate_sheet). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection. Если tools доступны, не говори, что нет доступа к файлу — сначала прочитай его. Предлагай правки текстом.';
+    let systemExtra =
+      'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Чат: читай открытый документ через tools (сначала get_workbook_outline/get_doc_outline или get_selection, затем read_range / read_formulas / read_document / search_in_document; для другого листа — activate_sheet). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection. Если tools доступны, не говори, что нет доступа к файлу — сначала прочитай его. Предлагай правки текстом.';
+    if (body.mode === 'plan') {
+      systemExtra =
+        'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим План: только читай документ через tools и создавай план (create_plan/update_plan). Не изменяй документ. Если пользователь говорит «здесь/это/выделенное», используй get_selection или контекст выделения. Для таблиц сначала read_range/read_formulas/get_selection; другой лист — activate_sheet. В плане указывай конкретные диапазоны/ячейки. Диаграммы (charts) tools не поддерживают — отмечай как ручной шаг.';
+    } else if (body.mode === 'agent') {
+      systemExtra =
+        'Ты помощник в офисном редакторе. Всегда отвечай пользователю на русском языке. Режим Агент: можешь читать и изменять документ через tools. Если пользователь говорит «здесь/это/выделенное», опирайся на selection / get_selection. Для таблиц: другие листы — сначала activate_sheet; insert_sheet/rename_sheet/delete_sheet/set_freeze для структуры; set_cells — литералы; set_formulas — формулы (EN-имена, аргументы через запятую, ведущий =, напр. =SUM(A1:A10); пустые ячейки в матрице можно оставлять — они пропускаются); copy_formulas — размножить формулы вниз с автосдвигом ссылок (предпочтительнее для 10+ одинаковых строк); read_formulas читает формулы и значения; insert_image — картинка по https URL; диаграммы (charts) недоступны как tool — скажи пользователю вставить вручную; для оформления — format_range, set_column_widths (ширина в пикселях, типично 80–220), set_number_format, set_borders, set_row_heights; add_conditional_highlight/get_conditional_formatting/clear_conditional_formatting — условное форматирование (empty/not_empty/number_between/text_contains/duplicate); set_list_validation/set_number_validation/get_data_validations/clear_data_validation — валидация (список или число between/gt/lt); для объединения — merge_range; sort_range — сортировка; create_filter/set_column_filter/remove_filter/get_filter — автофильтр; search_in_sheet / replace_in_sheet — поиск и замена литералов. Сначала read_range/read_formulas/get_selection. При выполнении плана вызывай update_plan по мере прогресса (status: completed). Для документов: get_doc_outline/search_in_document; структура — insert_paragraph, set_heading, set_list; format_text по выделению или paragraphIndex. После серии tools дай краткий итог.';
+    }
 
     let attempt = 0;
     while (attempt < 3) {
       if (signal?.aborted) return;
-      attempt++;
+      attempt += 1;
       try {
+        // eslint-disable-next-line no-await-in-loop -- sequential chat attempts with backoff
         const stream = await client.chat.completions.create(
           {
             model,
@@ -505,7 +516,11 @@ export class AiService {
           totalTokens: number;
         } | null = null;
 
-        for await (const chunk of stream) {
+        const iterator = stream[Symbol.asyncIterator]();
+        // eslint-disable-next-line no-await-in-loop -- consume OpenAI stream chunks in order
+        let step = await iterator.next();
+        while (!step.done) {
+          const chunk = step.value;
           if (signal?.aborted) return;
           const chunkUsage = (
             chunk as {
@@ -529,7 +544,7 @@ export class AiService {
             onEvent({ type: 'delta', content: delta.content });
           }
           if (delta?.tool_calls) {
-            for (const tc of delta.tool_calls) {
+            delta.tool_calls.forEach((tc) => {
               const idx = tc.index ?? 0;
               if (!toolCalls[idx]) {
                 toolCalls[idx] = {
@@ -543,8 +558,10 @@ export class AiService {
                 if (tc.function?.arguments)
                   toolCalls[idx].arguments += tc.function.arguments;
               }
-            }
+            });
           }
+          // eslint-disable-next-line no-await-in-loop -- consume OpenAI stream chunks in order
+          step = await iterator.next();
         }
 
         if (signal?.aborted) return;
@@ -564,16 +581,22 @@ export class AiService {
         return;
       } catch (e) {
         if (signal?.aborted) return;
-        const name = (e as { name?: string }).name;
+        const { name } = e as { name?: string };
         if (name === 'AbortError' || name === 'APIUserAbortError') return;
-        const status = (e as { status?: number }).status;
-        if ((status === 408 || status === 429) && attempt < 3 && !signal?.aborted) {
-          await new Promise((r) => setTimeout(r, 500 * attempt));
+        const { status } = e as { status?: number };
+        const shouldRetry =
+          (status === 408 || status === 429) && attempt < 3 && !signal?.aborted;
+        if (shouldRetry) {
+          const delayMs = 500 * attempt;
+          // eslint-disable-next-line no-await-in-loop -- backoff between provider retries
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, delayMs);
+          });
           if (signal?.aborted) return;
-          continue;
+        } else {
+          onEvent({ type: 'error', error: this.formatError(e) });
+          return;
         }
-        onEvent({ type: 'error', error: this.formatError(e) });
-        return;
       }
     }
   }
@@ -599,12 +622,14 @@ export class AiService {
       message?: string;
       error?: { message?: string } | string;
     };
-    const providerMsg =
-      typeof err.error === 'object' && err.error?.message
-        ? err.error.message
-        : typeof err.error === 'string'
-          ? err.error
-          : err.message;
+    let providerMsg: string | undefined;
+    if (typeof err.error === 'object' && err.error?.message) {
+      providerMsg = err.error.message;
+    } else if (typeof err.error === 'string') {
+      providerMsg = err.error;
+    } else {
+      providerMsg = err.message;
+    }
     if (err.status && LLM_ERROR_HINTS[err.status]) {
       const hint = LLM_ERROR_HINTS[err.status];
       if (providerMsg && !providerMsg.includes(hint)) {

@@ -23,7 +23,7 @@ onMounted(async () => {
   <div class="wrap">
     <AppLogo :size="40" :with-label="false" />
     <div class="row">
-      <span class="spinner" aria-hidden="true" />
+      <span class="spinner" :aria-hidden="true" />
       <span>Вход…</span>
     </div>
   </div>

@@ -2051,13 +2051,14 @@ export async function runOfficeTool(
               error: `invalid column/width: ${JSON.stringify(invalid)}`,
             });
           }
-          if (typeof sheet.setColumnWidth !== 'function') {
+          const { setColumnWidth } = sheet;
+          if (typeof setColumnWidth !== 'function') {
             return JSON.stringify({ error: 'setColumnWidth unavailable' });
           }
           widths.forEach((item) => {
             const index = resolveColumnIndex(item.column)!;
             const width = normalizePxWidth(Number(item.width));
-            sheet.setColumnWidth(index, width);
+            setColumnWidth.call(sheet, index, width);
             applied.push({ column: indexToColLetters(index), index, width });
           });
         } else if (
@@ -2080,12 +2081,13 @@ export async function runOfficeTool(
             });
           }
           const width = normalizePxWidth(rawWidth);
-          if (typeof sheet.setColumnWidths === 'function') {
-            sheet.setColumnWidths(start, num, width);
-          } else if (typeof sheet.setColumnWidth === 'function') {
+          const { setColumnWidths, setColumnWidth } = sheet;
+          if (typeof setColumnWidths === 'function') {
+            setColumnWidths.call(sheet, start, num, width);
+          } else if (typeof setColumnWidth === 'function') {
             Array.from({ length: num }).forEach((unused, i) => {
               void unused;
-              sheet.setColumnWidth(start + i, width);
+              setColumnWidth.call(sheet, start + i, width);
             });
           } else {
             return JSON.stringify({ error: 'setColumnWidth unavailable' });
@@ -2245,14 +2247,15 @@ export async function runOfficeTool(
               error: `invalid row/height: ${JSON.stringify(invalid)}`,
             });
           }
-          if (typeof sheet.setRowHeight !== 'function') {
+          const { setRowHeight } = sheet;
+          if (typeof setRowHeight !== 'function') {
             return JSON.stringify({ error: 'setRowHeight unavailable' });
           }
           heights.forEach((item) => {
             const row1 = Number(item.row);
             const height = Number(item.height);
             const index = Math.floor(row1) - 1;
-            sheet.setRowHeight(index, height);
+            setRowHeight.call(sheet, index, height);
             applied.push({ row: Math.floor(row1), index, height });
           });
         } else if (
@@ -2274,12 +2277,13 @@ export async function runOfficeTool(
             return JSON.stringify({ error: 'invalid startRow/numRows/height' });
           }
           const start = Math.floor(start1) - 1;
-          if (typeof sheet.setRowHeights === 'function') {
-            sheet.setRowHeights(start, num, height);
-          } else if (typeof sheet.setRowHeight === 'function') {
+          const { setRowHeights, setRowHeight } = sheet;
+          if (typeof setRowHeights === 'function') {
+            setRowHeights.call(sheet, start, num, height);
+          } else if (typeof setRowHeight === 'function') {
             Array.from({ length: num }).forEach((unused, i) => {
               void unused;
-              sheet.setRowHeight(start + i, height);
+              setRowHeight.call(sheet, start + i, height);
             });
           } else {
             return JSON.stringify({ error: 'setRowHeight unavailable' });

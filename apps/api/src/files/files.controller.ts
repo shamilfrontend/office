@@ -16,10 +16,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { User } from '@prisma/client';
 import type { Response } from 'express';
+import type { DocType } from '@office/shared';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { MulterFile } from '../types/uploaded-file';
-import type { DocType } from '@office/shared';
 import { FilesService } from './files.service';
 import type { DownloadFormat } from './files.service';
 

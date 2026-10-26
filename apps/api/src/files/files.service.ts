@@ -8,11 +8,11 @@ import { ConfigService } from '@nestjs/config';
 import type { User } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
+import type { DocType } from '@office/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserStorageService } from '../storage/user-storage.service';
 import type { MulterFile } from '../types/uploaded-file';
 import { decodeUploadFilename } from './decode-filename';
-import type { DocType } from '@office/shared';
 import {
   docToDocx,
   docxToDoc,

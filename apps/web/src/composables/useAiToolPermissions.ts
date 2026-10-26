@@ -103,10 +103,7 @@ export function isToolAutoAllowed(name: string): boolean {
   return permissions[category];
 }
 
-function setCategoryAllowed(
-  category: AiPermissionCategory,
-  enabled: boolean,
-) {
+function setCategoryAllowed(category: AiPermissionCategory, enabled: boolean) {
   permissions[category] = enabled;
   persist(permissions);
 }

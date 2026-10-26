@@ -281,9 +281,7 @@ export function getActiveWorkbook(api: UniverApi | null): SheetApi | null {
   return (api.getActiveWorkbook() as unknown as SheetApi | null) ?? null;
 }
 
-function getSheetSelection(
-  api: UniverApi | null,
-): SheetSelectionInfo | null {
+function getSheetSelection(api: UniverApi | null): SheetSelectionInfo | null {
   const wb = getActiveWorkbook(api);
   if (!wb) return null;
   try {

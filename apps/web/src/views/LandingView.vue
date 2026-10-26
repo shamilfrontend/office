@@ -84,8 +84,8 @@ function loginYandex() {
         <div class="hero-copy">
           <h1>Таблицы и документы в браузере</h1>
           <p class="lead">
-            Свои файлы на вашем сервере. AI-помощник подключается, только если он
-            нужен.
+            Свои файлы на вашем сервере. AI-помощник подключается, только если
+            он нужен.
           </p>
           <p v-if="authError" class="error" role="alert">
             {{ authError }}

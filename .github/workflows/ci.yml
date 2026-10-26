@@ -18,9 +18,18 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/shared/package-lock.json
+            apps/api/package-lock.json
+            apps/web/package-lock.json
 
       - name: Install
-        run: npm ci
+        run: |
+          npm ci
+          npm ci --prefix packages/shared
+          npm ci --prefix apps/api
+          npm ci --prefix apps/web
 
       - name: Lint
         run: npm run lint

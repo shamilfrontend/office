@@ -11,3 +11,4 @@ data/**
 .idea
 .vscode
 apps/api/prisma.config.ts
+graphify-out

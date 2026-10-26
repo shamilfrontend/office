@@ -180,6 +180,7 @@ function formatSize(bytes: number) {
   letter-spacing: -0.02em;
   color: var(--fg-0);
   font-weight: 600;
+}
 .empty {
   color: var(--fg-3);
   padding: 8px 0 4px;

@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+**/node_modules
+dist
+**/dist
+data
+.env
+**/.env
+*.md
+graphify-out
+coverage
+.DS_Store

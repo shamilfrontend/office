@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  deploy:
+    needs: lint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          YANDEX_CLIENT_ID: ${{ secrets.YANDEX_CLIENT_ID }}
+          YANDEX_CLIENT_SECRET: ${{ secrets.YANDEX_CLIENT_SECRET }}
+          YANDEX_REDIRECT_URI: ${{ secrets.YANDEX_REDIRECT_URI }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          umask 077
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'PORT=3000\n'
+            printf 'FRONTEND_URL=https://office.shamilfrontend.ru\n'
+            printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
+            printf 'DATA_ROOT=/data\n'
+            printf 'COOKIE_NAME=office_session\n'
+            printf 'COOKIE_SECURE=true\n'
+            printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+            printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
+            printf 'YANDEX_CLIENT_ID=%s\n' "$YANDEX_CLIENT_ID"
+            printf 'YANDEX_CLIENT_SECRET=%s\n' "$YANDEX_CLIENT_SECRET"
+            printf 'YANDEX_REDIRECT_URI=%s\n' "$YANDEX_REDIRECT_URI"
+          } > /tmp/office.env
+
+          ssh -o StrictHostKeyChecking=accept-new \
+            -p "${PORT}" \
+            -i ~/.ssh/deploy_key \
+            "${USER}@${HOST}" \
+            'set -euo pipefail
+            if [ ! -d /opt/office/.git ]; then
+              sudo mkdir -p /opt/office
+              sudo chown "$(whoami):$(whoami)" /opt/office
+              git clone https://github.com/shamilfrontend/office.git /opt/office
+            fi
+            cd /opt/office
+            git pull --ff-only origin main'
+
+          scp -o StrictHostKeyChecking=accept-new \
+            -P "${PORT}" \
+            -i ~/.ssh/deploy_key \
+            /tmp/office.env \
+            "${USER}@${HOST}:/opt/office/.env"
+
+          ssh -o StrictHostKeyChecking=accept-new \
+            -p "${PORT}" \
+            -i ~/.ssh/deploy_key \
+            "${USER}@${HOST}" \
+            'set -euo pipefail
+            chmod 600 /opt/office/.env
+            cd /opt/office
+            docker compose up -d --build'

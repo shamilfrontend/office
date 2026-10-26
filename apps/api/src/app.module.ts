@@ -4,6 +4,7 @@ import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { FilesModule } from './files/files.module';
+import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
@@ -19,5 +20,6 @@ import { UsersModule } from './users/users.module';
     FilesModule,
     AiModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

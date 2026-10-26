@@ -1,0 +1,16 @@
+office.shamilfrontend.ru {
+  encode gzip
+
+  request_body {
+    max_size 64MB
+  }
+
+  @api path_regexp ^/(health|auth/yandex(/.*)?|auth/me|auth/logout|auth/config|files(/.*)?|users(/.*)?|ai(/.*)?)$
+  handle @api {
+    reverse_proxy api:3000
+  }
+
+  handle {
+    reverse_proxy web:80
+  }
+}

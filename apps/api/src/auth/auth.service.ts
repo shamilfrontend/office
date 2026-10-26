@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { User } from '@prisma/client';
-import type { Response } from 'express';
+import type { CookieOptions, Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserStorageService } from '../storage/user-storage.service';
 
@@ -132,22 +132,28 @@ export class AuthService {
       sub: user.id,
       yandexId: user.yandexId,
     });
-    const cookieName =
-      this.config.get<string>('COOKIE_NAME') ?? 'office_session';
-    res.cookie(cookieName, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
-      path: '/',
+    res.cookie(this.cookieName(), token, {
+      ...this.sessionCookieOptions(),
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     return token;
   }
 
   clearSession(res: Response) {
-    const cookieName =
-      this.config.get<string>('COOKIE_NAME') ?? 'office_session';
-    res.clearCookie(cookieName);
+    res.clearCookie(this.cookieName(), this.sessionCookieOptions());
+  }
+
+  private cookieName(): string {
+    return this.config.get<string>('COOKIE_NAME') ?? 'office_session';
+  }
+
+  private sessionCookieOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: this.config.get<string>('COOKIE_SECURE') === 'true',
+      path: '/',
+    };
   }
 
   async getMePayload(user: User) {

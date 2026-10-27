@@ -18,6 +18,7 @@ import {
   indexToColLetters,
   mergePlanTodos,
   normalizePlanStatus,
+  SLIDE_WRITE_TOOL_NAMES,
   WRITE_TOOL_NAMES,
 } from '@office/shared';
 import {
@@ -42,6 +43,8 @@ import type { DocParagraph, UniverApi, UniverDocument } from './useUniver';
 
 export { toolsForMode } from '@office/shared';
 export type { ChatMode } from '@office/shared';
+
+const SLIDE_WRITE_TOOLS = new Set<string>(SLIDE_WRITE_TOOL_NAMES);
 
 const READ_MAX_ROWS = 80;
 const READ_MAX_COLS = 40;
@@ -83,6 +86,7 @@ export function needsApprove(
   args: Record<string, unknown>,
   api: UniverApi | null,
 ): boolean {
+  if (SLIDE_WRITE_TOOLS.has(name)) return true;
   if (
     name === 'clear_range' ||
     name === 'merge_range' ||
@@ -168,6 +172,16 @@ export function describeImpact(
   api: UniverApi | null,
 ): ImpactSummary {
   const title = name;
+  if (SLIDE_WRITE_TOOLS.has(name)) {
+    const text = args.text ?? args.content;
+    if (typeof text === 'string' && text.trim()) {
+      const clipped = text.trim().slice(0, 80);
+      const detail =
+        clipped.length < text.trim().length ? `${clipped}…` : clipped;
+      return { title, detail };
+    }
+    return { title, detail: 'правка слайда' };
+  }
   if (name === 'set_cells') {
     const cells = gridCellCount(args.values as unknown[][] | undefined);
     const start = args.start != null ? String(args.start) : 'активная ячейка';

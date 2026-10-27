@@ -59,6 +59,11 @@ export class UserStorageService implements OnModuleInit {
     return fs.readFile(full, 'utf8');
   }
 
+  async readDocumentBuffer(userId: string, relativePath: string) {
+    const full = this.resolveSafe(userId, relativePath);
+    return fs.readFile(full);
+  }
+
   async deleteDocument(userId: string, relativePath: string) {
     const full = this.resolveSafe(userId, relativePath);
     await fs.rm(full, { force: true });

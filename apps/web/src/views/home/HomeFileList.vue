@@ -79,7 +79,11 @@ function formatSize(bytes: number) {
             <button type="button" class="file-main" @click="emit('open', doc)">
               <span
                 class="type-icon"
-                :class="doc.type === 'SHEET' ? 'sheet' : 'doc'"
+                :class="{
+                  sheet: doc.type === 'SHEET',
+                  doc: doc.type === 'DOC',
+                  slide: doc.type === 'SLIDE',
+                }"
                 aria-hidden="true"
               >
                 <svg
@@ -101,6 +105,29 @@ function formatSize(bytes: number) {
                     d="M3 9h18M9 4v16"
                     stroke="currentColor"
                     stroke-width="1.5"
+                    fill="none"
+                  />
+                </svg>
+                <svg
+                  v-else-if="doc.type === 'SLIDE'"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                >
+                  <rect
+                    x="3"
+                    y="5"
+                    width="18"
+                    height="12"
+                    rx="2"
+                    fill="currentColor"
+                    opacity="0.2"
+                  />
+                  <path
+                    d="M8 21h8M12 17v4"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
                     fill="none"
                   />
                 </svg>
@@ -255,6 +282,10 @@ function formatSize(bytes: number) {
 .type-icon.doc {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+}
+.type-icon.slide {
+  background: color-mix(in srgb, #e8a317 16%, transparent);
+  color: #e8a317;
 }
 .file-name {
   font-weight: 500;

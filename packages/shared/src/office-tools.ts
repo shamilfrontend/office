@@ -1,5 +1,35 @@
 export type ChatMode = 'chat' | 'plan' | 'agent';
-export type DocType = 'SHEET' | 'DOC';
+export type DocType = 'SHEET' | 'DOC' | 'SLIDE';
+
+/** Read tools from @office-kit/pptx-editor. Schemas come from editor.tools(). */
+export const SLIDE_READ_TOOL_NAMES = [
+  'listSlides',
+  'listShapes',
+  'listLayouts',
+] as const;
+
+/** Write tools the agent may call on an open presentation. */
+export const SLIDE_WRITE_TOOL_NAMES = [
+  'setShapeText',
+  'addSlideShape',
+  'addSlide',
+  'removeSlide',
+  'moveSlide',
+  'setShapeFill',
+  'removeShape',
+] as const;
+
+export const SLIDE_TOOL_NAMES = new Set<string>([
+  ...SLIDE_READ_TOOL_NAMES,
+  ...SLIDE_WRITE_TOOL_NAMES,
+]);
+
+export function slideToolNamesForMode(mode: ChatMode): string[] {
+  if (mode === 'agent') {
+    return [...SLIDE_READ_TOOL_NAMES, ...SLIDE_WRITE_TOOL_NAMES];
+  }
+  return [...SLIDE_READ_TOOL_NAMES];
+}
 
 /** OpenAI-compatible tool definition (no openai package dependency). */
 export type OfficeToolDef = {
@@ -992,9 +1022,11 @@ export const OFFICE_TOOLS: OfficeToolDef[] = [
   },
 ];
 
-export const ALL_TOOL_NAMES = new Set(
-  OFFICE_TOOLS.map((t) => t.function.name).filter(Boolean),
-);
+export const ALL_TOOL_NAMES = new Set<string>([
+  ...OFFICE_TOOLS.map((t) => t.function.name).filter(Boolean),
+  ...SLIDE_READ_TOOL_NAMES,
+  ...SLIDE_WRITE_TOOL_NAMES,
+]);
 
 export const WRITE_TOOL_NAMES = new Set([
   'set_cells',
@@ -1029,6 +1061,7 @@ export const WRITE_TOOL_NAMES = new Set([
   'set_heading',
   'set_list',
   'format_text',
+  ...SLIDE_WRITE_TOOL_NAMES,
 ]);
 
 const SHEET_READ = [

@@ -6,6 +6,10 @@ import {
   parsePlanMarkdown,
   planAllTodosDone,
   planToMarkdown,
+  slideToolNamesForMode,
+  SLIDE_TOOL_NAMES,
+  type DocType,
+  type OfficeToolDef,
 } from '@office/shared';
 import {
   isDocumentWriteTool,
@@ -26,6 +30,23 @@ import type {
 import { persistAssistant, setToolRow } from './agentPersist';
 
 const TOKEN_RATE_MS = 200;
+
+function editorDocType(value: DocType | null | undefined): DocType {
+  if (value === 'DOC' || value === 'SLIDE') return value;
+  return 'SHEET';
+}
+
+function slideToolsForRequest(
+  defs: OfficeToolDef[] | undefined,
+  mode: Tab['mode'],
+  buildingPlan: boolean,
+  hasDocument: boolean,
+): OfficeToolDef[] {
+  const allowed = new Set(slideToolNamesForMode(mode));
+  const slide = (defs ?? []).filter((tool) => allowed.has(tool.function.name));
+  const plan = toolsForMode(mode, buildingPlan, hasDocument, 'SLIDE');
+  return [...slide, ...plan];
+}
 
 export type AgentLoopContext = {
   tabId: string;
@@ -79,14 +100,21 @@ export async function runAgentLoop(
     if (signal?.aborted) return 'aborted';
     steps += 1;
     const hasDocument = Boolean(props.documentId || props.docName);
-    const docType = props.docType === 'DOC' ? 'DOC' : 'SHEET';
-    const tools = toolsForMode(
-      tab.mode,
-      tab.executingPlan,
-      hasDocument,
-      docType,
-    );
-    if (tools.length && !props.univerApi) {
+    const docType = editorDocType(props.docType);
+    const tools =
+      docType === 'SLIDE'
+        ? slideToolsForRequest(
+            props.getSlideTools?.(),
+            tab.mode,
+            tab.executingPlan,
+            hasDocument,
+          )
+        : toolsForMode(tab.mode, tab.executingPlan, hasDocument, docType);
+    const editorReady =
+      docType === 'SLIDE'
+        ? Boolean(props.slideReady)
+        : Boolean(props.univerApi);
+    if (tools.length && !editorReady) {
       const content = 'Редактор ещё загружается, повторите.';
       tab.messages.push({
         key: crypto.randomUUID(),
@@ -122,6 +150,7 @@ export async function runAgentLoop(
       buildingPlan: tab.executingPlan,
       hasDocument: Boolean(props.documentId || props.docName),
       docType: props.docType,
+      slideTools: docType === 'SLIDE' ? props.getSlideTools?.() : undefined,
       calibrator: chatTokenCalibrator,
     }).usedTokens;
     const rateClock = { lastAt: getLastTokenRateAt() };
@@ -134,6 +163,7 @@ export async function runAgentLoop(
           docType,
           hasDocument,
           buildingPlan: tab.executingPlan,
+          slideTools: docType === 'SLIDE' ? props.getSlideTools?.() : undefined,
           providerId: tab.providerId || providers[0]?.id,
           model: tab.model || undefined,
         },
@@ -352,14 +382,22 @@ export async function runAgentLoop(
       }
       let result: string;
       try {
-        result = await runOfficeTool(call.name, args, {
-          api: apiRef,
-          docType: props.docType === 'DOC' ? 'DOC' : 'SHEET',
-          plan: tab.plan,
-          setPlan: (plan) => {
-            tab.plan = plan;
-          },
-        });
+        if (docType === 'SLIDE' && SLIDE_TOOL_NAMES.has(call.name)) {
+          if (!props.runSlideTool) {
+            throw new Error('Редактор презентации ещё не готов');
+          }
+          const value = await props.runSlideTool(call.name, args);
+          result = JSON.stringify(value ?? null);
+        } else {
+          result = await runOfficeTool(call.name, args, {
+            api: apiRef,
+            docType: docType === 'DOC' ? 'DOC' : 'SHEET',
+            plan: tab.plan,
+            setPlan: (plan) => {
+              tab.plan = plan;
+            },
+          });
+        }
       } catch (error) {
         result = JSON.stringify({
           error: error instanceof Error ? error.message : 'tool failed',

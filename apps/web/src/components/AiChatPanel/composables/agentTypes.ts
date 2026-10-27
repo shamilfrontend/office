@@ -1,12 +1,18 @@
 import type { ComputedRef, Ref } from 'vue';
+import type { OfficeToolDef } from '@office/shared';
 import type { UniverApi } from '@/univer/useUniver';
 import type { SessionLogEntry, Tab } from '../types';
 
+export type EditorDocType = 'SHEET' | 'DOC' | 'SLIDE';
+
 export type AgentChatProps = {
-  docType?: 'SHEET' | 'DOC' | null;
+  docType?: EditorDocType | null;
   docName?: string;
   documentId?: string;
   univerApi?: UniverApi | null;
+  slideReady?: boolean;
+  getSlideTools?: () => OfficeToolDef[];
+  runSlideTool?: (name: string, input: unknown) => Promise<unknown>;
   getSelectionContext?: () => string;
 };
 

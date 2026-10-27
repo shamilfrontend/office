@@ -21,7 +21,9 @@ import {
 } from './office-convert';
 
 export type { DocType };
-export type DownloadFormat = 'json' | 'csv' | 'xlsx' | 'docx';
+export type DownloadFormat = 'json' | 'csv' | 'xlsx' | 'docx' | 'pptx';
+
+const DOC_TYPES = new Set<DocType>(['SHEET', 'DOC', 'SLIDE']);
 
 @Injectable()
 export class FilesService {
@@ -51,17 +53,28 @@ export class FilesService {
       where: { id, userId },
     });
     if (!doc) throw new NotFoundException('Document not found');
+    if (doc.type === 'SLIDE') {
+      const bytes = await this.storage.readDocumentBuffer(
+        userId,
+        doc.relativePath,
+      );
+      return { ...doc, snapshot: bytes.toString('base64') };
+    }
     const snapshot = await this.storage.readDocument(userId, doc.relativePath);
     return { ...doc, snapshot: JSON.parse(snapshot) };
   }
 
   async create(user: User, type: DocType, name?: string) {
+    if (!DOC_TYPES.has(type)) {
+      throw new BadRequestException('Unknown document type');
+    }
     const title = name?.trim() || 'Без названия';
-    const fileName = `${randomUUID()}.json`;
+    const fileName = `${randomUUID()}${type === 'SLIDE' ? '.pptx' : '.json'}`;
     const relativePath = path.join('documents', fileName);
-    // Empty object: Univer createWorkbook/createDocument fills defaults on the client.
-    const snapshot = { id: randomUUID(), name: title };
-    const content = JSON.stringify(snapshot);
+    const content =
+      type === 'SLIDE'
+        ? await this.blankSlideBytes()
+        : JSON.stringify({ id: randomUUID(), name: title });
     await this.ensureQuota(user.id, Buffer.byteLength(content));
     const { size } = await this.storage.writeDocument(
       user.id,
@@ -84,7 +97,10 @@ export class FilesService {
       where: { id, userId },
     });
     if (!doc) throw new NotFoundException('Document not found');
-    const content = JSON.stringify(snapshot);
+    const content =
+      doc.type === 'SLIDE'
+        ? await this.slideBytesFromSnapshot(snapshot)
+        : JSON.stringify(snapshot);
     await this.ensureQuota(userId, Buffer.byteLength(content) - doc.size);
     const { size } = await this.storage.writeDocument(
       userId,
@@ -128,7 +144,7 @@ export class FilesService {
     const lower = original.toLowerCase();
     let type: DocType = 'SHEET';
     let snapshot: unknown;
-    const baseName = original.replace(/\.(json|csv|xlsx|docx)$/i, '');
+    const baseName = original.replace(/\.(json|csv|xlsx|docx|pptx)$/i, '');
 
     try {
       if (lower.endsWith('.xlsx')) {
@@ -137,6 +153,25 @@ export class FilesService {
       } else if (lower.endsWith('.docx')) {
         type = 'DOC';
         snapshot = await docxToDoc(baseName, file.buffer);
+      } else if (lower.endsWith('.pptx')) {
+        await this.assertPptx(file.buffer);
+        const pptxName = `${randomUUID()}.pptx`;
+        const pptxPath = path.join('documents', pptxName);
+        await this.ensureQuota(user.id, file.buffer.length);
+        const { size } = await this.storage.writeDocument(
+          user.id,
+          pptxPath,
+          file.buffer,
+        );
+        return this.prisma.document.create({
+          data: {
+            userId: user.id,
+            name: baseName,
+            type: 'SLIDE',
+            relativePath: pptxPath,
+            size,
+          },
+        });
       } else if (lower.endsWith('.csv')) {
         type = 'SHEET';
         snapshot = this.csvToSheet(baseName, file.buffer.toString('utf8'));
@@ -153,7 +188,7 @@ export class FilesService {
         snapshot = parsed;
       } else {
         throw new BadRequestException(
-          'Supported formats: .xlsx, .docx, .csv, .json',
+          'Supported formats: .xlsx, .docx, .pptx, .csv, .json',
         );
       }
     } catch (err) {
@@ -184,7 +219,26 @@ export class FilesService {
   }
 
   async download(userId: string, id: string, format: DownloadFormat = 'json') {
+    if (format === 'pptx') {
+      const row = await this.prisma.document.findFirst({
+        where: { id, userId },
+      });
+      if (!row) throw new NotFoundException('Document not found');
+      if (row.type !== 'SLIDE') {
+        throw new BadRequestException('PPTX only for presentations');
+      }
+      return {
+        filename: `${row.name}.pptx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        body: await this.storage.readDocumentBuffer(userId, row.relativePath),
+      };
+    }
+
     const doc = await this.get(userId, id);
+    if (doc.type === 'SLIDE') {
+      throw new BadRequestException('PPTX only for presentations');
+    }
     const snapshot = doc.snapshot as Record<string, unknown>;
 
     if (format === 'xlsx') {
@@ -316,6 +370,36 @@ export class FilesService {
       return values.join(',');
     });
     return lines.join('\n');
+  }
+
+  private async blankSlideBytes(): Promise<Buffer> {
+    const { createPresentation, savePresentation } =
+      await import('@office-kit/pptx');
+    const bytes = await savePresentation(createPresentation());
+    return Buffer.from(bytes);
+  }
+
+  private async assertPptx(bytes: Uint8Array): Promise<void> {
+    const { loadPresentation } = await import('@office-kit/pptx');
+    try {
+      await loadPresentation(bytes);
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Invalid PPTX',
+      );
+    }
+  }
+
+  private async slideBytesFromSnapshot(snapshot: unknown): Promise<Buffer> {
+    if (typeof snapshot !== 'string' || !snapshot.trim()) {
+      throw new BadRequestException('Presentation snapshot must be base64');
+    }
+    const bytes = Buffer.from(snapshot, 'base64');
+    if (!bytes.length) {
+      throw new BadRequestException('Presentation snapshot is empty');
+    }
+    await this.assertPptx(bytes);
+    return bytes;
   }
 
   private async ensureQuota(userId: string, delta: number) {

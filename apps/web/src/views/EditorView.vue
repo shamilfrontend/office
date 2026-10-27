@@ -6,6 +6,8 @@ import AiChatPanel from '@/components/AiChatPanel';
 import { uiConfirm } from '@/composables/useConfirm';
 import { useAuthStore } from '@/stores/auth';
 import { useFileTabsStore } from '@/stores/fileTabs';
+import { base64ToBytes, bytesToBase64 } from '@/slides/pptxBytes';
+import { useSlideEditor } from '@/slides/useSlideEditor';
 import { formatSelectionContext } from '@/univer/selection';
 import { useUniverHost } from '@/univer/useUniver';
 import EditorTopBar from './editor/EditorTopBar.vue';
@@ -21,11 +23,23 @@ const {
   mountSheet,
   mountDoc,
   getSnapshot,
+  destroy: destroyUniver,
 } = useUniverHost();
+const {
+  ready: slideReady,
+  toolDefs: slideToolDefs,
+  mount: mountSlide,
+  destroy: destroySlide,
+  save: saveSlide,
+  open: openSlide,
+  snapshot: snapshotSlide,
+  run: runSlideTool,
+  selectionText: slideSelectionText,
+} = useSlideEditor(container);
 
 const docId = computed(() => String(route.params.id));
 const docName = ref('…');
-const docType = ref<'SHEET' | 'DOC'>('SHEET');
+const docType = ref<'SHEET' | 'DOC' | 'SLIDE'>('SHEET');
 const saveState = ref<'saved' | 'saving' | 'dirty'>('saved');
 const saveFeedback = ref<'idle' | 'saving' | 'saved'>('idle');
 const chatCollapsed = ref(
@@ -73,8 +87,22 @@ async function load(id: string) {
     fileTabs.syncActive(doc.id, { name: doc.name, type: doc.type });
     await nextTick();
     if (seq !== loadSeq) return;
-    if (doc.type === 'SHEET') await mountSheet(doc.snapshot as object);
-    else await mountDoc(doc.snapshot as object);
+    await destroySlide();
+    if (doc.type === 'SLIDE') {
+      await destroyUniver();
+      const raw = doc.snapshot;
+      const bytes = base64ToBytes(typeof raw === 'string' ? raw : '');
+      await mountSlide(bytes, doc.name, {
+        onDirty: () => {
+          if (docType.value === 'SLIDE') markDirty();
+        },
+        onSave: persistSlideBytes,
+      });
+    } else if (doc.type === 'SHEET') {
+      await mountSheet(doc.snapshot as object);
+    } else {
+      await mountDoc(doc.snapshot as object);
+    }
     if (seq !== loadSeq) return;
     loadedId = id;
     saveState.value = 'saved';
@@ -110,12 +138,17 @@ function markDirty() {
   scheduleSave();
 }
 
+function onHostEdit() {
+  if (docType.value === 'SLIDE') return;
+  markDirty();
+}
+
 function bindDirtyListeners() {
   const el = container.value;
   if (!el || dirtyListenerBound) return;
   dirtyListenerBound = true;
-  el.addEventListener('keydown', markDirty, true);
-  el.addEventListener('pointerup', markDirty, true);
+  el.addEventListener('keydown', onHostEdit, true);
+  el.addEventListener('pointerup', onHostEdit, true);
 }
 
 function scheduleSave() {
@@ -143,8 +176,39 @@ async function confirmLeaveIfDirty(): Promise<boolean> {
   return saveState.value !== 'dirty';
 }
 
+async function persistSlideBytes(pptx: Uint8Array) {
+  const id = loadedId || docId.value;
+  try {
+    await api.saveFile(id, bytesToBase64(pptx), docName.value);
+    saveState.value = 'saved';
+    fileTabs.rename(id, docName.value);
+    showSavedFeedback();
+  } catch (e) {
+    saveState.value = 'dirty';
+    saveFeedback.value = 'idle';
+    console.error(e);
+    throw e;
+  }
+}
+
 async function save() {
   const id = loadedId || docId.value;
+  if (docType.value === 'SLIDE') {
+    if (!slideReady.value) return;
+    saveState.value = 'saving';
+    if (saveFeedbackTimer) {
+      clearTimeout(saveFeedbackTimer);
+      saveFeedbackTimer = null;
+    }
+    saveFeedback.value = 'saving';
+    try {
+      await saveSlide();
+    } catch {
+      saveState.value = 'dirty';
+      saveFeedback.value = 'idle';
+    }
+    return;
+  }
   const snapshot = getSnapshot(docType.value);
   if (!snapshot) return;
   saveState.value = 'saving';
@@ -170,7 +234,7 @@ function onTitleChange() {
   markDirty();
 }
 
-async function download(format: 'json' | 'csv' | 'xlsx' | 'docx') {
+async function download(format: 'json' | 'csv' | 'xlsx' | 'docx' | 'pptx') {
   await save();
   if (format === 'xlsx' && docType.value === 'SHEET') {
     const snapshot = getSnapshot('SHEET');
@@ -197,7 +261,11 @@ function toggleChat() {
   );
 }
 
-function takeCheckpoint() {
+async function takeCheckpoint() {
+  if (docType.value === 'SLIDE') {
+    checkpoint.value = await snapshotSlide();
+    return;
+  }
   checkpoint.value = getSnapshot(docType.value);
 }
 
@@ -210,13 +278,23 @@ async function restoreCheckpoint() {
     confirmLabel: 'Откатить',
   });
   if (!ok) return;
-  if (docType.value === 'SHEET') await mountSheet(checkpoint.value as object);
-  else await mountDoc(checkpoint.value as object);
+  if (docType.value === 'SLIDE' && checkpoint.value instanceof Uint8Array) {
+    await openSlide(checkpoint.value);
+  } else if (docType.value === 'SHEET') {
+    await mountSheet(checkpoint.value as object);
+  } else if (docType.value === 'DOC') {
+    await mountDoc(checkpoint.value as object);
+  }
   markDirty();
 }
 
 function selectionContext() {
+  if (docType.value === 'SLIDE') return slideSelectionText();
   return formatSelectionContext(univerApi.value, docType.value);
+}
+
+function slideTools() {
+  return slideToolDefs.value;
 }
 
 async function switchTab(id: string) {
@@ -247,7 +325,7 @@ function closeNewMenu() {
   newMenuOpen.value = false;
 }
 
-async function createAndOpen(type: 'SHEET' | 'DOC') {
+async function createAndOpen(type: 'SHEET' | 'DOC' | 'SLIDE') {
   if (creating.value) return;
   creating.value = true;
   newMenuOpen.value = false;
@@ -324,6 +402,9 @@ watch(
         :doc-name="docName"
         :document-id="docId"
         :univer-api="univerApi"
+        :slide-ready="slideReady"
+        :get-slide-tools="slideTools"
+        :run-slide-tool="runSlideTool"
         :get-selection-context="selectionContext"
         @toggle="toggleChat"
         @checkpoint="takeCheckpoint"

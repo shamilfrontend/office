@@ -1,4 +1,8 @@
+import type { DocType } from '@office/shared';
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+export type { DocType };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -44,11 +48,13 @@ export type Me = {
 export type DocItem = {
   id: string;
   name: string;
-  type: 'SHEET' | 'DOC';
+  type: DocType;
   size: number;
   updatedAt: string;
   createdAt: string;
 };
+
+export type DownloadFormat = 'json' | 'csv' | 'xlsx' | 'docx' | 'pptx';
 
 export const api = {
   authConfig: () => request<{ yandexEnabled: boolean }>('/auth/config'),
@@ -62,7 +68,7 @@ export const api = {
   listFiles: () => request<DocItem[]>('/files'),
   getFile: (id: string) =>
     request<DocItem & { snapshot: unknown }>(`/files/${id}`),
-  createFile: (type: 'SHEET' | 'DOC', name?: string) =>
+  createFile: (type: DocType, name?: string) =>
     request<DocItem>('/files', {
       method: 'POST',
       body: JSON.stringify({ type, name }),
@@ -85,10 +91,8 @@ export const api = {
     if (type) form.append('type', type);
     return request<DocItem>('/files/upload', { method: 'POST', body: form });
   },
-  downloadUrl: (
-    id: string,
-    format: 'json' | 'csv' | 'xlsx' | 'docx' = 'json',
-  ) => `/files/${id}/download?format=${format}`,
+  downloadUrl: (id: string, format: DownloadFormat = 'json') =>
+    `/files/${id}/download?format=${format}`,
   aiDefaults: () => request<Record<string, unknown>>('/ai/defaults'),
   listProviders: () =>
     request<

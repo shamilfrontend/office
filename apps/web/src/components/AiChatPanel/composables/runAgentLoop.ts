@@ -3,11 +3,11 @@ import { chatTokenCalibrator } from '@/ai/estimateTokens';
 import { api } from '@/api/client';
 import { isToolAutoAllowed } from '@/composables/useAiToolPermissions';
 import {
+  dispatchOfficeTool,
   parsePlanMarkdown,
   planAllTodosDone,
   planToMarkdown,
   slideToolNamesForMode,
-  SLIDE_TOOL_NAMES,
   type DocType,
   type OfficeToolDef,
 } from '@office/shared';
@@ -382,22 +382,26 @@ export async function runAgentLoop(
       }
       let result: string;
       try {
-        if (docType === 'SLIDE' && SLIDE_TOOL_NAMES.has(call.name)) {
-          if (!props.runSlideTool) {
-            throw new Error('Редактор презентации ещё не готов');
-          }
-          const value = await props.runSlideTool(call.name, args);
-          result = JSON.stringify(value ?? null);
-        } else {
-          result = await runOfficeTool(call.name, args, {
-            api: apiRef,
-            docType: docType === 'DOC' ? 'DOC' : 'SHEET',
-            plan: tab.plan,
-            setPlan: (plan) => {
-              tab.plan = plan;
-            },
-          });
-        }
+        result = await dispatchOfficeTool({
+          docType,
+          name: call.name,
+          args,
+          runSlide: async (name, toolArgs) => {
+            if (!props.runSlideTool) {
+              throw new Error('Редактор презентации ещё не готов');
+            }
+            return props.runSlideTool(name, toolArgs);
+          },
+          runOffice: (name, toolArgs, officeType) =>
+            runOfficeTool(name, toolArgs, {
+              api: apiRef,
+              docType: officeType,
+              plan: tab.plan,
+              setPlan: (plan) => {
+                tab.plan = plan;
+              },
+            }),
+        });
       } catch (error) {
         result = JSON.stringify({
           error: error instanceof Error ? error.message : 'tool failed',

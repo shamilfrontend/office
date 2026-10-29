@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
     "prepare": "npm run build",
     "smoke": "npm run build && node scripts/smoke.mjs",
+    "test:policy": "npm run build && node scripts/tool-policy.test.mjs",
     "lint": "npm run lint --prefix ../..",
     "lint:fix": "npm run lint:fix --prefix ../..",
     "format": "npm run format --prefix ../.."

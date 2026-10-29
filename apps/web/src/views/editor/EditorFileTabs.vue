@@ -123,21 +123,13 @@ const emit = defineEmits<{
         +
       </button>
       <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
-        <button
-          type="button"
-          role="menuitem"
-          @click="emit('create', 'SHEET')"
-        >
+        <button type="button" role="menuitem" @click="emit('create', 'SHEET')">
           Новая таблица
         </button>
         <button type="button" role="menuitem" @click="emit('create', 'DOC')">
           Новый документ
         </button>
-        <button
-          type="button"
-          role="menuitem"
-          @click="emit('create', 'SLIDE')"
-        >
+        <button type="button" role="menuitem" @click="emit('create', 'SLIDE')">
           Новая презентация
         </button>
         <button type="button" role="menuitem" @click="emit('open-files')">

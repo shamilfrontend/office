@@ -34,6 +34,21 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Check shared
+        run: |
+          npm run build:shared
+          npm run smoke:shared
+          npm run test:policy
+
+      - name: Typecheck web
+        run: npm run typecheck --prefix apps/web
+
+      - name: Build api
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql://office:office@127.0.0.1:5432/office
+        run: ./node_modules/.bin/prisma generate && npm run build
+
   deploy:
     needs: lint
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

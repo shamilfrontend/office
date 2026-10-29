@@ -26,7 +26,18 @@ export {
   adjustFormulaRefs,
   collectFormulaCells,
   colLettersToIndex,
+  estimateA1Area,
   indexToColLetters,
+  parseA1Cell,
 } from './a1';
+
+export { needsApprove, type ApproveProbe } from './tool-approval';
+
+export {
+  dispatchOfficeTool,
+  resolveToolTarget,
+  toolTargetResult,
+  type ToolTarget,
+} from './tool-dispatch';
 
 export { systemPromptForMode } from './system-prompts';

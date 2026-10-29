@@ -203,6 +203,11 @@ async function save() {
     saveFeedback.value = 'saving';
     try {
       await saveSlide();
+      if (saveState.value === 'saving') {
+        saveState.value = 'saved';
+        fileTabs.rename(id, docName.value);
+        showSavedFeedback();
+      }
     } catch {
       saveState.value = 'dirty';
       saveFeedback.value = 'idle';

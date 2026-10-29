@@ -2,6 +2,8 @@ import { colLettersToIndex, indexToColLetters } from '@office/shared';
 import { DocSelectionManagerService } from '@univerjs/docs';
 import type { UniverApi, UniverDocument } from './useUniver';
 
+export { estimateA1Area, parseA1Cell } from '@office/shared';
+
 export type SheetSelectionInfo = {
   kind: 'SHEET';
   sheet: string;
@@ -182,22 +184,6 @@ export type SheetApi = {
   setActiveSheet?: (sheet: SheetHandle | string) => unknown;
 };
 
-/** Estimate cell count of an A1 range (e.g. A1:C10 → 30). */
-export function estimateA1Area(a1: string): number {
-  const clean = String(a1 || '')
-    .trim()
-    .replace(/^[^!]*!/, '');
-  if (!clean) return 0;
-  const parts = clean.split(':');
-  const start = parseA1Cell(parts[0]);
-  if (!start) return 0;
-  const end = parts[1] ? parseA1Cell(parts[1]) : start;
-  if (!end) return 0;
-  return (
-    (Math.abs(end.row - start.row) + 1) * (Math.abs(end.col - start.col) + 1)
-  );
-}
-
 export function resolveColumnIndex(column: string | number): number | null {
   if (typeof column === 'number' && Number.isFinite(column)) {
     return column >= 0 ? Math.floor(column) : null;
@@ -223,15 +209,6 @@ export function setSelectionInjector(injector: InjectorLike | null) {
 
 export function getSelectionInjector(): InjectorLike | null {
   return currentInjector;
-}
-
-export function parseA1Cell(a1: string): { row: number; col: number } | null {
-  const m = String(a1 || '')
-    .trim()
-    .replace(/^[^!]*!/, '')
-    .match(/^\$?([A-Za-z]+)\$?(\d+)$/);
-  if (!m) return null;
-  return { col: colLettersToIndex(m[1]), row: Number(m[2]) - 1 };
 }
 
 export function a1FromRowCol(row: number, col: number): string {

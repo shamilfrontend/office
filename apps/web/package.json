@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b",
     "preview": "vite preview",
     "lint": "npm run lint --prefix ../..",
     "lint:fix": "npm run lint:fix --prefix ../..",
@@ -13,6 +14,8 @@
   },
   "dependencies": {
     "@mertdeveci55/univer-import-export": "^0.2.1",
+    "@office-kit/pptx": "0.28.0",
+    "@office-kit/pptx-editor": "0.2.4",
     "@office/shared": "file:../../packages/shared",
     "@univerjs/core": "^1.0.4",
     "@univerjs/docs": "^1.0.4",

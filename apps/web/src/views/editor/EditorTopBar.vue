@@ -5,7 +5,7 @@ defineProps<{
   docName: string;
   titleWidth: string;
   saveFeedback: 'idle' | 'saving' | 'saved';
-  docType: 'SHEET' | 'DOC';
+  docType: 'SHEET' | 'DOC' | 'SLIDE';
 }>();
 
 const emit = defineEmits<{
@@ -13,7 +13,7 @@ const emit = defineEmits<{
   'title-change': [];
   home: [];
   save: [];
-  download: [format: 'xlsx' | 'docx'];
+  download: [format: 'xlsx' | 'docx' | 'pptx'];
   settings: [];
 }>();
 </script>
@@ -64,6 +64,25 @@ const emit = defineEmits<{
         title="Скачать Excel"
         aria-label="Скачать Excel"
         @click="emit('download', 'xlsx')"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path
+            d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+      <button
+        v-else-if="docType === 'SLIDE'"
+        type="button"
+        class="top-icon-btn"
+        title="Скачать PowerPoint"
+        aria-label="Скачать PowerPoint"
+        @click="emit('download', 'pptx')"
       >
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path

@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import {
   ALL_TOOL_NAMES,
+  slideToolNamesForMode,
   toolsForMode as sharedToolsForMode,
   type ChatMode,
   type DocType,
@@ -8,7 +9,7 @@ import {
 
 export type { ChatMode, DocType };
 
-export { ALL_TOOL_NAMES };
+export { ALL_TOOL_NAMES, slideToolNamesForMode };
 
 export function toolsForMode(
   mode: ChatMode,

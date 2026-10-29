@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineProps<{
-  tabs: Array<{ id: string; name: string; type: 'SHEET' | 'DOC' }>;
+  tabs: Array<{ id: string; name: string; type: 'SHEET' | 'DOC' | 'SLIDE' }>;
   activeId: string;
   creating: boolean;
   newMenuOpen: boolean;
@@ -11,7 +11,7 @@ const emit = defineEmits<{
   close: [id: string, event?: Event];
   'toggle-new': [];
   'close-new': [];
-  create: [type: 'SHEET' | 'DOC'];
+  create: [type: 'SHEET' | 'DOC' | 'SLIDE'];
   'open-files': [];
 }>();
 </script>
@@ -33,7 +33,11 @@ const emit = defineEmits<{
       >
         <span
           class="file-tab-type"
-          :class="tab.type === 'SHEET' ? 'sheet' : 'doc'"
+          :class="{
+            sheet: tab.type === 'SHEET',
+            doc: tab.type === 'DOC',
+            slide: tab.type === 'SLIDE',
+          }"
           aria-hidden="true"
         >
           <svg
@@ -55,6 +59,29 @@ const emit = defineEmits<{
               d="M3 9h18M9 4v16"
               stroke="currentColor"
               stroke-width="1.5"
+              fill="none"
+            />
+          </svg>
+          <svg
+            v-else-if="tab.type === 'SLIDE'"
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+          >
+            <rect
+              x="3"
+              y="5"
+              width="18"
+              height="12"
+              rx="2"
+              fill="currentColor"
+              opacity="0.2"
+            />
+            <path
+              d="M8 21h8M12 17v4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
               fill="none"
             />
           </svg>
@@ -82,33 +109,32 @@ const emit = defineEmits<{
           ×
         </span>
       </button>
-      <div class="file-tabs-new">
-        <button
-          type="button"
-          class="file-tab-plus"
-          title="Новая вкладка"
-          :disabled="creating"
-          aria-haspopup="menu"
-          :aria-expanded="newMenuOpen"
-          @click="emit('toggle-new')"
-        >
-          +
+    </div>
+    <div class="file-tabs-new">
+      <button
+        type="button"
+        class="file-tab-plus"
+        title="Новая вкладка"
+        :disabled="creating"
+        aria-haspopup="menu"
+        :aria-expanded="newMenuOpen"
+        @click="emit('toggle-new')"
+      >
+        +
+      </button>
+      <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
+        <button type="button" role="menuitem" @click="emit('create', 'SHEET')">
+          Новая таблица
         </button>
-        <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            @click="emit('create', 'SHEET')"
-          >
-            Новая таблица
-          </button>
-          <button type="button" role="menuitem" @click="emit('create', 'DOC')">
-            Новый документ
-          </button>
-          <button type="button" role="menuitem" @click="emit('open-files')">
-            Открыть файл…
-          </button>
-        </div>
+        <button type="button" role="menuitem" @click="emit('create', 'DOC')">
+          Новый документ
+        </button>
+        <button type="button" role="menuitem" @click="emit('create', 'SLIDE')">
+          Новая презентация
+        </button>
+        <button type="button" role="menuitem" @click="emit('open-files')">
+          Открыть файл…
+        </button>
       </div>
     </div>
     <button
@@ -124,6 +150,7 @@ const emit = defineEmits<{
 <style scoped lang="scss">
 .file-tabs-row {
   position: relative;
+  z-index: 20;
   display: flex;
   align-items: stretch;
   background: var(--bg-1);
@@ -136,7 +163,7 @@ const emit = defineEmits<{
   gap: 0;
   overflow-x: auto;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   scrollbar-width: thin;
 }
 .file-tabs-new {
@@ -225,6 +252,10 @@ const emit = defineEmits<{
 .file-tab-type.doc {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.file-tab-type.slide {
+  color: #e8a317;
+  background: color-mix(in srgb, #e8a317 16%, transparent);
 }
 .file-tab-name {
   flex: 1;

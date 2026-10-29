@@ -1,4 +1,5 @@
 import { ref, watch, type ComputedRef } from 'vue';
+import type { OfficeToolDef } from '@office/shared';
 import {
   estimateChatContextUsage,
   type ChatContextUsage,
@@ -12,11 +13,19 @@ const CONTEXT_USAGE_MS = 400;
 export function useContextUsage(options: {
   active: ComputedRef<Tab | null>;
   docName: () => string | undefined;
-  docType: () => 'SHEET' | 'DOC' | null | undefined;
+  docType: () => 'SHEET' | 'DOC' | 'SLIDE' | null | undefined;
   documentId: () => string | undefined;
   getSelectionContext: () => (() => string) | undefined;
+  getSlideTools?: () => OfficeToolDef[];
 }) {
-  const { active, docName, docType, documentId, getSelectionContext } = options;
+  const {
+    active,
+    docName,
+    docType,
+    documentId,
+    getSelectionContext,
+    getSlideTools,
+  } = options;
 
   const contextUsage = ref<ChatContextUsage | null>(null);
   let contextUsageTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,6 +50,7 @@ export function useContextUsage(options: {
       selectionContext: tab.includeDoc ? getSelectionContext()?.() : undefined,
       buildingPlan: tab.executingPlan,
       hasDocument,
+      slideTools: docType() === 'SLIDE' ? getSlideTools?.() : undefined,
       calibrator: chatTokenCalibrator,
     });
   }

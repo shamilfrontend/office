@@ -78,7 +78,7 @@ async function openDoc(doc: Pick<DocItem, 'id' | 'name' | 'type'>) {
   await router.push({ name: 'edit', params: { id: doc.id } });
 }
 
-async function create(type: 'SHEET' | 'DOC') {
+async function create(type: 'SHEET' | 'DOC' | 'SLIDE') {
   busy.value = true;
   try {
     const doc = await api.createFile(type);
@@ -98,7 +98,9 @@ async function onLocalFile(e: Event) {
     let upload = file;
     let typeHint: string | undefined;
     const lower = file.name.toLowerCase();
-    if (
+    if (lower.endsWith('.pptx')) {
+      typeHint = 'SLIDE';
+    } else if (
       lower.endsWith('.xlsx') ||
       lower.endsWith('.xls') ||
       lower.endsWith('.csv')
@@ -137,7 +139,9 @@ async function remove(doc: DocItem) {
 
 async function download(doc: DocItem) {
   menuOpenId.value = null;
-  const format = doc.type === 'SHEET' ? 'xlsx' : 'docx';
+  let format: 'xlsx' | 'docx' | 'pptx' = 'docx';
+  if (doc.type === 'SHEET') format = 'xlsx';
+  else if (doc.type === 'SLIDE') format = 'pptx';
   window.open(api.downloadUrl(doc.id, format), '_blank');
 }
 

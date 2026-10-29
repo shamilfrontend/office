@@ -10,7 +10,7 @@ import type { Tab, UiMsg } from '../types';
 
 export function useTranscriptUi(options: {
   active: ComputedRef<Tab | null>;
-  docType: () => 'SHEET' | 'DOC' | null | undefined;
+  docType: () => 'SHEET' | 'DOC' | 'SLIDE' | null | undefined;
   attachError: Ref<string>;
   transcriptEl: () => HTMLElement | null | undefined;
 }) {
@@ -29,7 +29,29 @@ export function useTranscriptUi(options: {
 
   const emptyHints = computed(() => {
     const mode = active.value?.mode || 'agent';
-    const isDoc = docType() === 'DOC';
+    const kind = docType();
+    if (kind === 'SLIDE') {
+      if (mode === 'plan') {
+        return [
+          'Составь план презентации на 5 слайдов',
+          'Разбей задачу на шаги без правок файла',
+          'Какие слайды стоит сократить?',
+        ];
+      }
+      if (mode === 'chat') {
+        return [
+          'О чём эта презентация?',
+          'Что сейчас выделено?',
+          'Перескажи заголовки слайдов',
+        ];
+      }
+      return [
+        'Смени заголовок на первом слайде',
+        'Добавь слайд с тремя тезисами',
+        'Сделай выделенный текст короче',
+      ];
+    }
+    const isDoc = kind === 'DOC';
     if (mode === 'plan') {
       return isDoc
         ? [

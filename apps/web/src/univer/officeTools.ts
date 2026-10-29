@@ -17,7 +17,11 @@ import {
   collectFormulaCells,
   indexToColLetters,
   mergePlanTodos,
+  needsApprove as needsToolApprove,
   normalizePlanStatus,
+  SLIDE_TOOL_NAMES,
+  SLIDE_WRITE_TOOL_NAMES,
+  toolTargetResult,
   WRITE_TOOL_NAMES,
 } from '@office/shared';
 import {
@@ -43,14 +47,12 @@ import type { DocParagraph, UniverApi, UniverDocument } from './useUniver';
 export { toolsForMode } from '@office/shared';
 export type { ChatMode } from '@office/shared';
 
+const SLIDE_WRITE_TOOLS = new Set<string>(SLIDE_WRITE_TOOL_NAMES);
+
 const READ_MAX_ROWS = 80;
 const READ_MAX_COLS = 40;
 const READ_MAX_CELLS = 1200;
 const SEARCH_MAX_HITS = 50;
-const DATA_APPROVE_CELLS = 20;
-const FORMAT_APPROVE_CELLS = 50;
-const LAYOUT_APPROVE_COUNT = 5;
-const DOC_APPROVE_CHARS = 200;
 
 export type ImpactSummary = { title: string; detail: string };
 
@@ -83,83 +85,10 @@ export function needsApprove(
   args: Record<string, unknown>,
   api: UniverApi | null,
 ): boolean {
-  if (
-    name === 'clear_range' ||
-    name === 'merge_range' ||
-    name === 'replace_text' ||
-    name === 'replace_in_sheet' ||
-    name === 'delete_sheet' ||
-    name === 'insert_sheet' ||
-    name === 'rename_sheet' ||
-    name === 'set_freeze' ||
-    name === 'sort_range' ||
-    name === 'create_filter' ||
-    name === 'remove_filter' ||
-    name === 'set_column_filter' ||
-    name === 'add_conditional_highlight' ||
-    name === 'clear_conditional_formatting' ||
-    name === 'set_list_validation' ||
-    name === 'set_number_validation' ||
-    name === 'clear_data_validation'
-  ) {
-    return true;
-  }
-  if (name === 'set_cells') {
-    return (
-      gridCellCount(args.values as unknown[][] | undefined) > DATA_APPROVE_CELLS
-    );
-  }
-  if (name === 'set_formulas') {
-    return (
-      gridCellCount(args.formulas as unknown[][] | undefined) >
-      DATA_APPROVE_CELLS
-    );
-  }
-  if (name === 'copy_formulas') {
-    const times = Math.max(1, Number(args.times) || 1);
-    return (
-      times > 3 ||
-      estimateA1Area(String(args.source || '')) * times > DATA_APPROVE_CELLS
-    );
-  }
-  if (name === 'insert_image') return true;
-  if (
-    name === 'format_range' ||
-    name === 'set_number_format' ||
-    name === 'set_borders'
-  ) {
-    return resolvedArea(api, args.range) > FORMAT_APPROVE_CELLS;
-  }
-  if (name === 'set_column_widths') {
-    const widths = args.widths as unknown[] | undefined;
-    if (Array.isArray(widths) && widths.length > LAYOUT_APPROVE_COUNT)
-      return true;
-    const num = Number(args.numColumns);
-    return Number.isFinite(num) && num > LAYOUT_APPROVE_COUNT;
-  }
-  if (name === 'set_row_heights') {
-    const heights = args.heights as unknown[] | undefined;
-    if (Array.isArray(heights) && heights.length > LAYOUT_APPROVE_COUNT)
-      return true;
-    const num = Number(args.numRows);
-    return Number.isFinite(num) && num > LAYOUT_APPROVE_COUNT;
-  }
-  if (name === 'replace_selection') return true;
-  if (name === 'set_heading' || name === 'set_list') return true;
-  if (name === 'insert_text') {
-    const text = String(args.text ?? '');
-    const at = args.at != null ? String(args.at) : 'end';
-    return text.length > DOC_APPROVE_CHARS || at === 'selection';
-  }
-  if (name === 'insert_paragraph') {
-    return String(args.text ?? '').length > DOC_APPROVE_CHARS;
-  }
-  if (name === 'format_text') {
-    const sel = getDocSelection(api);
-    const len = sel?.text?.length ?? 0;
-    return len > DOC_APPROVE_CHARS;
-  }
-  return false;
+  return needsToolApprove(name, args, {
+    area: (rangeArg) => resolvedArea(api, rangeArg),
+    docSelectionLength: getDocSelection(api)?.text?.length ?? 0,
+  });
 }
 
 export function describeImpact(
@@ -168,6 +97,16 @@ export function describeImpact(
   api: UniverApi | null,
 ): ImpactSummary {
   const title = name;
+  if (SLIDE_WRITE_TOOLS.has(name)) {
+    const text = args.text ?? args.content;
+    if (typeof text === 'string' && text.trim()) {
+      const clipped = text.trim().slice(0, 80);
+      const detail =
+        clipped.length < text.trim().length ? `${clipped}…` : clipped;
+      return { title, detail };
+    }
+    return { title, detail: 'правка слайда' };
+  }
   if (name === 'set_cells') {
     const cells = gridCellCount(args.values as unknown[][] | undefined);
     const start = args.start != null ? String(args.start) : 'активная ячейка';
@@ -719,6 +658,9 @@ export async function runOfficeTool(
     setPlan: (p: typeof ctx.plan) => void;
   },
 ): Promise<string> {
+  if (SLIDE_TOOL_NAMES.has(name)) {
+    return toolTargetResult('reject', name);
+  }
   if (name === 'create_plan') {
     const rawTodos =
       (args.todos as Array<{
@@ -2784,5 +2726,5 @@ export async function runOfficeTool(
     }
   }
 
-  return JSON.stringify({ error: `unknown tool ${name}` });
+  return toolTargetResult('unknown', name);
 }

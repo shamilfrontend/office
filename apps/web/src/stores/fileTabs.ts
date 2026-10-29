@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth';
 type FileTab = {
   id: string;
   name: string;
-  type: 'SHEET' | 'DOC';
+  type: DocItem['type'];
 };
 
 type Persisted = {

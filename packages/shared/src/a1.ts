@@ -20,6 +20,31 @@ export function indexToColLetters(col: number): string {
   return s;
 }
 
+export function parseA1Cell(a1: string): { row: number; col: number } | null {
+  const matched = String(a1 || '')
+    .trim()
+    .replace(/^[^!]*!/, '')
+    .match(/^\$?([A-Za-z]+)\$?(\d+)$/);
+  if (!matched) return null;
+  return { col: colLettersToIndex(matched[1]), row: Number(matched[2]) - 1 };
+}
+
+/** Estimate cell count of an A1 range (e.g. A1:C10 → 30). */
+export function estimateA1Area(a1: string): number {
+  const clean = String(a1 || '')
+    .trim()
+    .replace(/^[^!]*!/, '');
+  if (!clean) return 0;
+  const parts = clean.split(':');
+  const start = parseA1Cell(parts[0]);
+  if (!start) return 0;
+  const end = parts[1] ? parseA1Cell(parts[1]) : start;
+  if (!end) return 0;
+  return (
+    (Math.abs(end.row - start.row) + 1) * (Math.abs(end.col - start.col) + 1)
+  );
+}
+
 /** Shift relative A1 refs in a formula by dRow/dCol (absolute $ refs stay put). */
 export function adjustFormulaRefs(
   formula: string,

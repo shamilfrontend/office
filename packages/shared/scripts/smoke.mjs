@@ -34,6 +34,28 @@ const planMode = s
 assert(planMode.includes('create_plan'), 'plan mode has create_plan');
 assert(!planMode.includes('set_cells'), 'plan mode has no write tools');
 
+const slideAgent = s.slideToolNamesForMode('agent');
+assert(slideAgent.includes('listSlides'), 'slide agent can list slides');
+assert(slideAgent.includes('setShapeText'), 'slide agent can set text');
+assert(
+  !s.slideToolNamesForMode('chat').includes('removeSlide'),
+  'slide chat cannot remove slides',
+);
+const slideCatalog = s
+  .toolsForMode('agent', false, true, 'SLIDE')
+  .map((t) => t.function.name);
+assert(!slideCatalog.includes('set_cells'), 'slide catalog has no sheet tools');
+assert(
+  !slideCatalog.includes('listSlides'),
+  'slide schemas are not hardcoded in the catalog',
+);
+assert(s.SLIDE_TOOL_NAMES.has('addSlide'), 'SLIDE_TOOL_NAMES has addSlide');
+assert(s.WRITE_TOOL_NAMES.has('setShapeText'), 'WRITE has setShapeText');
+assert(
+  s.systemPromptForMode('agent', 'SLIDE').includes('listSlides'),
+  'slide system prompt mentions listSlides',
+);
+
 // 2) parsePlanMarkdown + hydrate (reload / «Сделать по плану»)
 const md = `# Финансовый план
 

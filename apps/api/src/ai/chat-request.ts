@@ -4,6 +4,7 @@ import {
   type ChatMode,
   type DocType,
   ALL_TOOL_NAMES,
+  slideToolNamesForMode,
   toolsForMode,
 } from './office-tools.catalog';
 
@@ -13,7 +14,9 @@ const MAX_TOTAL_CHARS = 200_000;
 const MAX_ARGS_CHARS = 8_000;
 
 const MODES = new Set<ChatMode>(['chat', 'plan', 'agent']);
-const DOC_TYPES = new Set<DocType>(['SHEET', 'DOC']);
+const DOC_TYPES = new Set<DocType>(['SHEET', 'DOC', 'SLIDE']);
+const MAX_SLIDE_TOOL_DESC = 2000;
+const MAX_SLIDE_TOOL_SCHEMA = 50_000;
 const ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 const TOOL_CHOICES = new Set(['auto', 'none', 'required']);
 
@@ -138,6 +141,52 @@ function sanitizeToolCalls(
   return out.length ? out : undefined;
 }
 
+function sanitizeSlideTools(
+  raw: unknown,
+  allowed: Set<string>,
+): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  return raw.reduce<OpenAI.Chat.Completions.ChatCompletionTool[]>(
+    (acc, item) => {
+      if (!item || typeof item !== 'object') return acc;
+      const rec = item as Record<string, unknown>;
+      const fnRaw =
+        rec.function && typeof rec.function === 'object'
+          ? (rec.function as Record<string, unknown>)
+          : rec;
+      const name = typeof fnRaw.name === 'string' ? fnRaw.name : '';
+      if (!name || !allowed.has(name) || seen.has(name)) return acc;
+      let description =
+        typeof fnRaw.description === 'string' ? fnRaw.description : name;
+      if (description.length > MAX_SLIDE_TOOL_DESC) {
+        description = description.slice(0, MAX_SLIDE_TOOL_DESC);
+      }
+      const parameters = fnRaw.parameters ?? fnRaw.input_schema;
+      if (
+        !parameters ||
+        typeof parameters !== 'object' ||
+        Array.isArray(parameters)
+      ) {
+        return acc;
+      }
+      const encoded = JSON.stringify(parameters);
+      if (encoded.length > MAX_SLIDE_TOOL_SCHEMA) return acc;
+      seen.add(name);
+      acc.push({
+        type: 'function',
+        function: {
+          name,
+          description,
+          parameters: JSON.parse(encoded) as Record<string, unknown>,
+        },
+      });
+      return acc;
+    },
+    [],
+  );
+}
+
 function sanitizeMessage(
   raw: unknown,
   index: number,
@@ -224,7 +273,17 @@ export function sanitizeChatRequest(body: unknown): SanitizedChatRequest {
     b.messages.map((m, i) => sanitizeMessage(m, i)),
   );
 
-  const tools = toolsForMode(mode, buildingPlan, hasDocument, docType);
+  const catalogTools = toolsForMode(mode, buildingPlan, hasDocument, docType);
+  const tools =
+    docType === 'SLIDE' && hasDocument
+      ? [
+          ...sanitizeSlideTools(
+            b.slideTools,
+            new Set(slideToolNamesForMode(mode)),
+          ),
+          ...catalogTools,
+        ]
+      : catalogTools;
 
   let toolChoice: 'auto' | 'none' | 'required' = 'auto';
   if (typeof b.tool_choice === 'string' && TOOL_CHOICES.has(b.tool_choice)) {

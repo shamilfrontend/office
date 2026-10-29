@@ -8,6 +8,7 @@ import {
   watch,
 } from 'vue';
 import { useRouter } from 'vue-router';
+import type { OfficeToolDef } from '@office/shared';
 import { useAuthStore } from '@/stores/auth';
 import type { UniverApi } from '@/univer/useUniver';
 import { useAgentChat } from './composables/useAgentChat';
@@ -33,10 +34,13 @@ import ChatTranscript from './parts/ChatTranscript.vue';
 
 const props = defineProps<{
   collapsed: boolean;
-  docType?: 'SHEET' | 'DOC' | null;
+  docType?: 'SHEET' | 'DOC' | 'SLIDE' | null;
   docName?: string;
   documentId?: string;
   univerApi?: UniverApi | null;
+  slideReady?: boolean;
+  getSlideTools?: () => OfficeToolDef[];
+  runSlideTool?: (name: string, input: unknown) => Promise<unknown>;
   getSelectionContext?: () => string;
 }>();
 
@@ -168,6 +172,7 @@ const { contextUsage, refreshContextUsage, resetContextUsage } =
     docType: () => props.docType,
     documentId: () => props.documentId,
     getSelectionContext: () => props.getSelectionContext,
+    getSlideTools: () => props.getSlideTools?.() ?? [],
   });
 
 const {

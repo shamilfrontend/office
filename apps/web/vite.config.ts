@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'node:path'
+import { pptxEditorRu } from './vite-plugin-pptx-ru.ts'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [pptxEditorRu(), vue()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -28,6 +29,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    exclude: ['@office-kit/pptx-editor'],
     include: [
       'react',
       'react-dom',

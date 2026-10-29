@@ -468,7 +468,7 @@ export class AiService {
       });
       return;
     }
-    const systemExtra = systemPromptForMode(body.mode);
+    const systemExtra = systemPromptForMode(body.mode, body.docType);
 
     let attempt = 0;
     while (attempt < 3) {

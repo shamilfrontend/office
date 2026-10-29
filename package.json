@@ -6,6 +6,7 @@
   "scripts": {
     "build:shared": "npm run build --prefix packages/shared",
     "smoke:shared": "npm run smoke --prefix packages/shared",
+    "test:policy": "npm run test:policy --prefix packages/shared",
     "dev": "npm run build:shared && concurrently -n api,web -c blue,green \"npm run start:dev --prefix apps/api\" \"npm run dev --prefix apps/web\"",
     "dev:web": "npm run build:shared && npm run dev --prefix apps/web",
     "dev:api": "npm run build:shared && npm run start:dev --prefix apps/api",

@@ -60,7 +60,7 @@ export class FilesController {
     @Query('format') format: DownloadFormat | undefined,
     @Res() res: Response,
   ) {
-    const allowed: DownloadFormat[] = ['json', 'csv', 'xlsx', 'docx'];
+    const allowed: DownloadFormat[] = ['json', 'csv', 'xlsx', 'docx', 'pptx'];
     const fmt =
       format && allowed.includes(format) ? format : ('json' as DownloadFormat);
     const file = await this.files.download(user.id, id, fmt);

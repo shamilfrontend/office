@@ -7,7 +7,7 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  create: [type: 'SHEET' | 'DOC'];
+  create: [type: 'SHEET' | 'DOC' | 'SLIDE'];
   'local-file': [event: Event];
 }>();
 
@@ -82,6 +82,36 @@ defineExpose({ fileInput });
       <button
         type="button"
         class="tile"
+        :disabled="busy"
+        @click="emit('create', 'SLIDE')"
+      >
+        <span class="tile-icon slide" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22">
+            <rect
+              x="3"
+              y="5"
+              width="18"
+              height="12"
+              rx="2"
+              fill="currentColor"
+              opacity="0.18"
+            />
+            <path
+              d="M8 21h8M12 17v4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              fill="none"
+            />
+          </svg>
+        </span>
+        <span class="tile-text">
+          <span class="tile-label">Новая презентация</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        class="tile"
         :disabled="busy || uploading"
         :aria-busy="uploading"
         @click="pickLocal"
@@ -108,7 +138,7 @@ defineExpose({ fileInput });
       <input
         ref="fileInput"
         type="file"
-        accept=".xlsx,.xls,.docx,.csv,.json"
+        accept=".xlsx,.xls,.docx,.pptx,.csv,.json"
         hidden
         @change="emit('local-file', $event)"
       />
@@ -180,6 +210,10 @@ defineExpose({ fileInput });
 .tile-icon.doc {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+}
+.tile-icon.slide {
+  background: color-mix(in srgb, #e8a317 16%, transparent);
+  color: #e8a317;
 }
 .tile-icon.upload {
   background: var(--bg-3);

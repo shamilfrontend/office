@@ -26,8 +26,8 @@ if (process.env.OFFICE_USE_PROXY !== 'true') {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
-  app.use(express.json({ limit: '4mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '4mb' }));
+  app.use(express.json({ limit: '32mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '32mb' }));
   const config = app.get(ConfigService);
   const frontend =
     config.get<string>('FRONTEND_URL') ?? 'http://localhost:5176';

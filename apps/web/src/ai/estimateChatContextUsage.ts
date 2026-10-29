@@ -1,4 +1,9 @@
-import { systemPromptForMode } from '@office/shared';
+import {
+  slideToolNamesForMode,
+  systemPromptForMode,
+  type DocType,
+  type OfficeToolDef,
+} from '@office/shared';
 import { toolsForMode, type ChatMode } from '@/univer/officeTools';
 import {
   MESSAGE_FRAMING_TOKENS,
@@ -66,7 +71,7 @@ function buildPendingUserContent(opts: {
   attachments: Array<{ name: string; text: string }>;
   includeDoc: boolean;
   docName?: string;
-  docType?: 'SHEET' | 'DOC' | null;
+  docType?: DocType | null;
   selectionContext?: string;
 }): string {
   const display = opts.draft.trim();
@@ -93,10 +98,11 @@ export function estimateChatContextUsage(opts: {
   attachments: Array<{ name: string; text: string }>;
   includeDoc: boolean;
   docName?: string;
-  docType?: 'SHEET' | 'DOC' | null;
+  docType?: DocType | null;
   selectionContext?: string;
   buildingPlan?: boolean;
   hasDocument?: boolean;
+  slideTools?: OfficeToolDef[];
   calibrator?: TokenEstimateCalibrator;
 }): ChatContextUsage {
   const calibrator = opts.calibrator ?? chatTokenCalibrator;
@@ -108,16 +114,27 @@ export function estimateChatContextUsage(opts: {
     reservedOutputTokenSpace,
   );
 
-  const systemTokens = estimateMessageTokens(systemPromptForMode(opts.mode));
-
   const hasDocument = opts.hasDocument !== false;
-  const docType = opts.docType === 'DOC' ? 'DOC' : 'SHEET';
-  const tools = toolsForMode(
+  const docType: DocType =
+    opts.docType === 'DOC' || opts.docType === 'SLIDE' ? opts.docType : 'SHEET';
+  const systemTokens = estimateMessageTokens(
+    systemPromptForMode(opts.mode, docType),
+  );
+
+  const catalogTools = toolsForMode(
     opts.mode,
     Boolean(opts.buildingPlan),
     hasDocument,
     docType,
   );
+  const allowedSlideTools = new Set(slideToolNamesForMode(opts.mode));
+  const slideTools =
+    docType === 'SLIDE'
+      ? (opts.slideTools ?? []).filter((tool) =>
+          allowedSlideTools.has(tool.function.name),
+        )
+      : [];
+  const tools = [...slideTools, ...catalogTools];
   const toolsTokens = tools.length
     ? estimateTextTokens(JSON.stringify(tools))
     : 0;

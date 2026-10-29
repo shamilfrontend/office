@@ -109,40 +109,40 @@ const emit = defineEmits<{
           ×
         </span>
       </button>
-      <div class="file-tabs-new">
+    </div>
+    <div class="file-tabs-new">
+      <button
+        type="button"
+        class="file-tab-plus"
+        title="Новая вкладка"
+        :disabled="creating"
+        aria-haspopup="menu"
+        :aria-expanded="newMenuOpen"
+        @click="emit('toggle-new')"
+      >
+        +
+      </button>
+      <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
         <button
           type="button"
-          class="file-tab-plus"
-          title="Новая вкладка"
-          :disabled="creating"
-          aria-haspopup="menu"
-          :aria-expanded="newMenuOpen"
-          @click="emit('toggle-new')"
+          role="menuitem"
+          @click="emit('create', 'SHEET')"
         >
-          +
+          Новая таблица
         </button>
-        <div v-if="newMenuOpen" class="ui-dropdown file-tabs-menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            @click="emit('create', 'SHEET')"
-          >
-            Новая таблица
-          </button>
-          <button type="button" role="menuitem" @click="emit('create', 'DOC')">
-            Новый документ
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            @click="emit('create', 'SLIDE')"
-          >
-            Новая презентация
-          </button>
-          <button type="button" role="menuitem" @click="emit('open-files')">
-            Открыть файл…
-          </button>
-        </div>
+        <button type="button" role="menuitem" @click="emit('create', 'DOC')">
+          Новый документ
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          @click="emit('create', 'SLIDE')"
+        >
+          Новая презентация
+        </button>
+        <button type="button" role="menuitem" @click="emit('open-files')">
+          Открыть файл…
+        </button>
       </div>
     </div>
     <button
@@ -158,6 +158,7 @@ const emit = defineEmits<{
 <style scoped lang="scss">
 .file-tabs-row {
   position: relative;
+  z-index: 20;
   display: flex;
   align-items: stretch;
   background: var(--bg-1);
@@ -170,7 +171,7 @@ const emit = defineEmits<{
   gap: 0;
   overflow-x: auto;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   scrollbar-width: thin;
 }
 .file-tabs-new {
